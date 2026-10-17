@@ -60,4 +60,4 @@ Uygulamalar tüm kullanıcılardan ve yeni açılacak hesaplardan kaldırılır.
 
 ---
 
-<a href="https://gokhanturk.com"><img src="https://gokhanturk.com/favicon.svg" width="16" height="16" align="absmiddle"> gokhanturk.com</a>
+<p align="center"><a href="https://gokhanturk.com"><img src="https://gokhanturk.com/favicon.svg" width="16" height="16" align="absmiddle"> gokhanturk.com</a></p>
