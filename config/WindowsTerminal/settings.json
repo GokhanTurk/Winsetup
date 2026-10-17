@@ -46,7 +46,7 @@
         "face": "FiraCode Nerd Font Mono"
       },
       "opacity": 90,
-      "useAcrylic": false
+      "useAcrylic": true
     },
     "list": [
       {

@@ -175,21 +175,37 @@ function Test-NameLike([string]$Name, [string[]]$Patterns) {
     $false
 }
 
-function Test-ShouldRemove([string]$Name, [string]$FamilyOrFullName, [string]$DebloatLevel) {
-    if (Test-NameLike $Name $JunkApps) { return $true }
+function Test-ShouldRemove([string]$Name, [string]$FamilyOrFullName, [string]$DebloatLevel, [string[]]$Extra) {
+    if (Test-NameLike $Name ($JunkApps + $Extra)) { return $true }
     if ($DebloatLevel -ne 'Full') { return $false }
     $isMicrosoft = $FamilyOrFullName -like '*_8wekyb3d8bbwe' -or $FamilyOrFullName -like '*_cw5n1h2txyewy'
     $isMicrosoft -and -not (Test-NameLike $Name $FullKeepApps)
 }
 
-function Remove-Bloatware([string]$DebloatLevel) {
+# Copilot artık Store uygulamasının yanında Edge gibi ayrı bir Win32 program olarak da geliyor.
+function Remove-CopilotApp {
+    $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Copilot'
+    $uninstall = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue).UninstallString
+    if ($uninstall -match '^"([^"]+)"\s*(.*)$') {
+        Get-Process -Name '*copilot*' -ErrorAction SilentlyContinue | Stop-Process -Force
+        Start-Process -FilePath $Matches[1] -ArgumentList "$($Matches[2]) --force-uninstall" -Wait -WindowStyle Hidden
+        if (Test-Path -LiteralPath $key) { Write-Warn 'Copilot (Win32) kaldırılamadı' } else { Write-Ok 'Kaldırıldı: Copilot (Win32)' }
+    }
+    # EdgeUpdate Copilot'u tekrar kurmasın
+    Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate' 'Install{C50565E9-CCCF-44B4-BA15-5AC5C6569197}' 0
+    Set-Reg 'HKCU:\Software\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 1
+    Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 1
+}
+
+# Extra: bu profilde ayrıca kaldırılacak paketler
+function Remove-Bloatware([string]$DebloatLevel, [string[]]$Extra = @()) {
     $deprovisioned = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Deprovisioned'
 
     # Yeni kullanıcılar için (provisioned)
     foreach ($pkg in Get-AppxProvisionedPackage -Online) {
         $parts = $pkg.PackageName -split '_'
         $family = "$($parts[0])_$($parts[-1])"
-        if (-not (Test-ShouldRemove $pkg.DisplayName $family $DebloatLevel)) { continue }
+        if (-not (Test-ShouldRemove $pkg.DisplayName $family $DebloatLevel $Extra)) { continue }
         try {
             Remove-AppxProvisionedPackage -Online -PackageName $pkg.PackageName -AllUsers -ErrorAction Stop | Out-Null
             # Windows özellik güncellemesinden sonra geri yüklenmesin
@@ -205,7 +221,7 @@ function Remove-Bloatware([string]$DebloatLevel) {
         -not $_.IsFramework -and -not $_.NonRemovable -and $_.SignatureKind -ne 'System'
     } | Sort-Object PackageFullName -Unique
     foreach ($pkg in $installed) {
-        if (-not (Test-ShouldRemove $pkg.Name $pkg.PackageFamilyName $DebloatLevel)) { continue }
+        if (-not (Test-ShouldRemove $pkg.Name $pkg.PackageFamilyName $DebloatLevel $Extra)) { continue }
         try {
             Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
             Write-Ok "Kaldırıldı: $($pkg.Name)"
@@ -213,6 +229,8 @@ function Remove-Bloatware([string]$DebloatLevel) {
             Write-Warn "Kaldırılamadı: $($pkg.Name)"
         }
     }
+
+    Remove-CopilotApp
 }
 
 function Set-ContentDeliveryOff([string]$Root) {
@@ -368,11 +386,23 @@ function Set-TaskbarTweaks([int]$SearchMode) {
     Set-Reg $adv 'ShowTaskViewButton' 0
     Set-Reg $adv 'TaskbarMn' 0
     Set-Reg $adv 'ShowCopilotButton' 0
-    Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' 'AllowNewsAndInterests' 0
-    Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds' 'EnableFeeds' 0
-    Set-Reg 'HKCU:\Software\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 1
-    Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 1
+    # Widgets ayarları (Dsh, Windows Feeds, TaskbarDa) Windows tarafından kilitli (UCPD);
+    # Widgets'ı kapatmak için Oyun/VM/İş profilleri uygulamanın kendisini kaldırır.
     Write-Ok 'Görev çubuğu sadeleştirildi'
+}
+
+# Arayüz dili ve klavye değişmez; tarih/saat/sayı biçimleri, konum ve saat dilimi Türkiye olur.
+function Set-TurkishRegion {
+    try {
+        Set-Culture tr-TR -ErrorAction Stop
+        Set-WinHomeLocation -GeoId 235 -ErrorAction Stop
+        Set-TimeZone -Id 'Turkey Standard Time' -ErrorAction Stop
+        # Karşılama ekranı ve yeni kullanıcılar da aynı biçimleri alsın
+        Copy-UserInternationalSettingsToSystem -WelcomeScreen $true -NewUser $true -ErrorAction SilentlyContinue
+        Write-Ok 'Bölge biçimleri Türkiye (tr-TR) olarak ayarlandı'
+    } catch {
+        Write-Warn "Bölge ayarları uygulanamadı: $($_.Exception.Message)"
+    }
 }
 
 function Set-FileExtensionsVisible {
@@ -639,8 +669,10 @@ function Install-PersonalEnvironment {
     # PowerShell 7 profili
     $docs = [Environment]::GetFolderPath('MyDocuments')
     Save-File "$RepoRaw/config/PowerShell/profile.ps1" "$docs\PowerShell\Microsoft.PowerShell_profile.ps1"
-    $pwsh = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
-    if (Test-Path $pwsh) {
+    # Store sürümü WindowsApps'te, winget/MSI sürümü Program Files'ta olur
+    $pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+    if (-not $pwsh -and (Test-Path "$env:ProgramFiles\PowerShell\7\pwsh.exe")) { $pwsh = "$env:ProgramFiles\PowerShell\7\pwsh.exe" }
+    if ($pwsh) {
         & $pwsh -NoProfile -Command 'Install-Module PSFzf -Scope CurrentUser -Force -Repository PSGallery' 2>&1 | Out-Null
     } else {
         Write-Warn 'PowerShell 7 bulunamadı, PSFzf kurulamadı'
@@ -669,8 +701,8 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Debloat (Full): hesap makinesi, notepad, terminal, ekran alıntısı, Store, fotoğraflar, paint ve codec''ler hariç her şey' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
             New-Step 'Edge kaldır (WebView2 kalır)' { Remove-Edge }
             New-Step 'OneDrive kaldır' { Remove-OneDrive }
-            New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...)' { Remove-OptionalComponents }
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arka plan uygulamaları kapalı' { Disable-BackgroundApps }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
             New-Step 'Hızlı başlatma / hazırda bekletme kapalı' { Disable-FastBoot }
@@ -682,10 +714,12 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Kilit ekranı ve hesap resimleri siyah' { Set-BlackLockScreen }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
+            New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
         }
         'Work' {
-            New-Step 'Debloat (Standart): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' { Remove-Bloatware 'Standard'; Protect-Debloat 'Standard' }
+            New-Step 'Debloat (Standart + Widgets): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' { Remove-Bloatware 'Standard' @('MicrosoftWindows.Client.WebExperience'); Protect-Debloat 'Standard' }
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
             New-Step 'Hızlı başlatma / hazırda bekletme kapalı' { Disable-FastBoot }
             New-Step 'Uygulamalar: 7-Zip, Firefox' { Install-Apps @('7zip.7zip', 'Mozilla.Firefox') }
@@ -695,16 +729,18 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
         'VM' {
             New-Step 'Debloat (Full): Edge dahil kalanlar korunur' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
             New-Step 'OneDrive kaldır' { Remove-OneDrive }
-            New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...)' { Remove-OptionalComponents }
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arka plan uygulamaları kapalı' { Disable-BackgroundApps }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
+            New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
         }
         'Standard' {
             New-Step 'Debloat (Standart): sadece çöp uygulamalar, Xbox/Edge/Store ve günlük uygulamalar kalır' { Remove-Bloatware 'Standard'; Protect-Debloat 'Standard' }
             New-Step 'Reklam, öneri ve telemetri kapalı' { Set-PrivacyTweaks }
+            New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Görev çubuğu sadeleştirme (arama simge olarak kalır)' { Set-TaskbarTweaks 1 }
             New-Step 'Dosya uzantılarını göster' { Set-FileExtensionsVisible }
             New-Step 'Uygulama: 7-Zip' { Install-Apps @('7zip.7zip') }
@@ -713,7 +749,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             if ($DebloatLevel -eq 'Full') {
                 New-Step 'Debloat (Full): hesap makinesi, notepad, terminal, ekran alıntısı, Store, Edge, fotoğraflar, paint ve codec''ler hariç her şey' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
                 New-Step 'OneDrive kaldır' { Remove-OneDrive }
-                New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...)' { Remove-OptionalComponents }
+                New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
             } else {
                 New-Step 'Debloat (Standart): sadece çöp uygulamalar, tüm kullanıcılardan ve yeni kullanıcılardan' { Remove-Bloatware 'Standard'; Protect-Debloat 'Standard' }
             }
