@@ -376,7 +376,19 @@ function Set-PrivacyTweaks {
     Set-Reg 'HKCU:\Software\Policies\Microsoft\Windows\Explorer' 'DisableSearchBoxSuggestions' 1
     Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'Start_IrisRecommendations' 0
     Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'Start_AccountNotifications' 0
-    Write-Ok 'Reklam, öneri ve telemetri kapatıldı'
+    # "Suggest ways to get the most out of Windows and finish setting up this device"
+    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement' 'ScoobeSystemSettingEnabled' 0
+    # Dosya Gezgini'nde OneDrive/Microsoft 365 tanıtımları
+    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'ShowSyncProviderNotifications' 0
+    # Arama vurguları (trendler, günün olayları)
+    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\SearchSettings' 'IsDynamicSearchBoxEnabled' 0
+    Write-Ok 'Reklam, öneri, ipucu ve telemetri kapatıldı'
+}
+
+# Ayarlar > Bildirimler ana anahtarı; kullanıcı istediğinde tekrar açabilir.
+function Disable-Notifications {
+    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications' 'ToastEnabled' 0
+    Write-Ok 'Tüm bildirimler kapatıldı'
 }
 
 # SearchMode: 0 = gizli, 1 = sadece simge
@@ -757,7 +769,8 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Debloat (Full): hesap makinesi, notepad, terminal, ekran alıntısı, Store, fotoğraflar, paint ve codec''ler hariç her şey' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
             New-Step 'Edge kaldır (WebView2 kalır)' { Remove-Edge }
             New-Step 'OneDrive kaldır' { Remove-OneDrive }
-            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arka plan uygulamaları kapalı' { Disable-BackgroundApps }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
@@ -775,7 +788,8 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
         }
         'Work' {
             New-Step 'Debloat (Standart + Widgets): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' { Remove-Bloatware 'Standard' @('MicrosoftWindows.Client.WebExperience'); Protect-Debloat 'Standard' }
-            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
             New-Step 'Hızlı başlatma / hazırda bekletme kapalı' { Disable-FastBoot }
@@ -787,7 +801,8 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
         'VM' {
             New-Step 'Debloat (Full): Edge dahil kalanlar korunur' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
             New-Step 'OneDrive kaldır' { Remove-OneDrive }
-            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arka plan uygulamaları kapalı' { Disable-BackgroundApps }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
@@ -798,7 +813,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
         }
         'Standard' {
             New-Step 'Debloat (Standart): sadece çöp uygulamalar, Xbox/Edge/Store ve günlük uygulamalar kalır' { Remove-Bloatware 'Standard'; Protect-Debloat 'Standard' }
-            New-Step 'Reklam, öneri ve telemetri kapalı' { Set-PrivacyTweaks }
+            New-Step 'Reklam, öneri, ipucu ve telemetri kapalı' { Set-PrivacyTweaks }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Görev çubuğu sadeleştirme (arama simge olarak kalır)' { Set-TaskbarTweaks 1 }
             New-Step 'Dosya uzantılarını göster' { Set-FileExtensionsVisible }

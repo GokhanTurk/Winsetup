@@ -50,6 +50,8 @@ Her iki seviyede de Copilot (Store ve Win32 sürümü) kaldırılır ve tekrar k
 
 - Script Windows PowerShell 5.1'de çalışır (Appx modülü için); PowerShell 7'den çağrılırsa otomatik geçer.
 - `Debloat` dışındaki tüm profillerde bölge biçimleri Türkiye yapılır (tarih/saat/sayı tr-TR, konum Türkiye, saat dilimi İstanbul); arayüz dili ve klavye değişmez.
+- Oyun, İş ve VM profillerinde tüm bildirimler kapatılır (Ayarlar > Bildirimler'den tekrar açılabilir; İş'te Teams/Outlook bildirimleri de gelmez).
+- Debloat dışındaki tüm profillerde Windows ipuçları ve önerileri kapatılır: "Get tips", "Suggest ways to get the most out of Windows", welcome experience, Ayarlar ve Başlat önerileri, kilit ekranı ipuçları, Explorer'daki OneDrive tanıtımları, arama vurguları.
 - Widgets ayarları Windows tarafından kilitli (UCPD), bu yüzden Widgets uygulamanın kendisi kaldırılarak kapatılır (Oyun, VM, İş).
 - Kişisel ayarlar scripti çalıştıran (yönetici yetkisi veren) kullanıcıya uygulanır.
 - Edge, Windows büyük sürüm güncellemelerinde geri gelebilir; script tekrar çalıştırılabilir.
