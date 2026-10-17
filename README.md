@@ -57,3 +57,7 @@ irm gokhanturk.com/uninstall | iex
 - **Full:** Microsoft uygulamalarının neredeyse hepsi. Hesap makinesi, Notepad, Terminal, Ekran Alıntısı, Store, Fotoğraflar, Paint ve codec'ler kalır.
 
 Uygulamalar tüm kullanıcılardan ve yeni açılacak hesaplardan kaldırılır. Log: `%TEMP%\Winsetup.log`
+
+---
+
+<a href="https://gokhanturk.com"><img src="https://gokhanturk.com/favicon.svg" width="16" height="16" align="absmiddle"> gokhanturk.com</a>
