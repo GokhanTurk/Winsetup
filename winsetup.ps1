@@ -452,6 +452,61 @@ function Set-InterfaceCleanup {
     Write-Ok 'Arayüz temizlendi (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)'
 }
 
+# desktop.ini'deki [LocalizedFileNames] haritası: "dfrgui.lnk" -> "Defragment and Optimize Drives"
+function Get-LocalizedShortcutNames([string]$Dir) {
+    $map = @{}
+    $ini = Join-Path $Dir 'desktop.ini'
+    if (-not (Test-Path -LiteralPath $ini)) { return $map }
+    if (-not ('Winsetup.IndirectString' -as [type])) {
+        Add-Type -Namespace Winsetup -Name IndirectString -MemberDefinition @'
+[DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
+public static extern int SHLoadIndirectString(string pszSource, System.Text.StringBuilder pszOutBuf, int cchOutBuf, IntPtr ppvReserved);
+'@
+    }
+    $inSection = $false
+    foreach ($line in Get-Content -LiteralPath $ini -Force -ErrorAction SilentlyContinue) {
+        if ($line -match '^\s*\[(.+)\]') { $inSection = $Matches[1] -eq 'LocalizedFileNames'; continue }
+        if (-not $inSection -or $line -notmatch '^(.+?)=(.+)$') { continue }
+        $file = $Matches[1].Trim()
+        $source = [Environment]::ExpandEnvironmentVariables($Matches[2].Trim())
+        $name = $source
+        if ($source.StartsWith('@')) {
+            $sb = New-Object System.Text.StringBuilder 1024
+            if ([Winsetup.IndirectString]::SHLoadIndirectString($source, $sb, $sb.Capacity, [IntPtr]::Zero) -ne 0) { continue }
+            $name = $sb.ToString()
+        }
+        $map[$file] = $name
+    }
+    $map
+}
+
+# Başlat menüsünde klasör kalmaz, tüm kısayollar en üst düzeye taşınır; görünüm liste olur.
+function Set-FlatStartMenu {
+    $junk = '(?i)^uninstall|release notes|\bfaq|support center|readme|web ?site|documentation|license'
+    $roots = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
+    foreach ($root in $roots) {
+        # Startup Başlat menüsü klasörü değil, açılışta çalışan programlar; dokunulmaz
+        foreach ($dir in Get-ChildItem -LiteralPath $root -Directory -Force | Where-Object { $_.Name -ne 'Startup' }) {
+            # -Include, 5.1'de -LiteralPath ile çalışmıyor; uzantıyla süzülür
+            $shortcuts = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Force | Where-Object { $_.Extension -in '.lnk', '.url' }
+            foreach ($file in $shortcuts) {
+                if ($file.BaseName -match $junk) { continue }
+                $names = Get-LocalizedShortcutNames $file.DirectoryName
+                $display = if ($names.ContainsKey($file.Name)) { $names[$file.Name] } else { $file.BaseName }
+                $display = $display -replace '[\\/:*?"<>|]', ''
+                $target = Join-Path $root ($display + $file.Extension)
+                if (-not (Test-Path -LiteralPath $target)) {
+                    Move-Item -LiteralPath $file.FullName -Destination $target -ErrorAction SilentlyContinue
+                }
+            }
+            Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Start' 'AllAppsViewMode' 2
+    Stop-Process -Name StartMenuExperienceHost -Force -ErrorAction SilentlyContinue
+    Write-Ok 'Başlat menüsü klasörsüz ve liste görünümünde'
+}
+
 function Disable-FastBoot {
     powercfg.exe /hibernate off
     Set-Reg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' 'HiberbootEnabled' 0
@@ -714,6 +769,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Kilit ekranı ve hesap resimleri siyah' { Set-BlackLockScreen }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
+            New-Step 'Başlat menüsü: klasörsüz, liste görünümü (Uninstall/Readme gibi bağlantılar silinir)' { Set-FlatStartMenu }
             New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
         }
         'Work' {
@@ -725,6 +781,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Uygulamalar: 7-Zip, Firefox' { Install-Apps @('7zip.7zip', 'Mozilla.Firefox') }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
+            New-Step 'Başlat menüsü: klasörsüz, liste görünümü (Uninstall/Readme gibi bağlantılar silinir)' { Set-FlatStartMenu }
         }
         'VM' {
             New-Step 'Debloat (Full): Edge dahil kalanlar korunur' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
@@ -735,6 +792,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
+            New-Step 'Başlat menüsü: klasörsüz, liste görünümü (Uninstall/Readme gibi bağlantılar silinir)' { Set-FlatStartMenu }
             New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
         }
         'Standard' {
