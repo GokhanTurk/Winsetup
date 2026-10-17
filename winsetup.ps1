@@ -182,14 +182,69 @@ function Test-ShouldRemove([string]$Name, [string]$FamilyOrFullName, [string]$De
     $isMicrosoft -and -not (Test-NameLike $Name $FullKeepApps)
 }
 
+$CopilotKey = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Copilot'
+$EdgeKey = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge'
+
+$AppLabels = @{
+    'Microsoft.BingNews' = 'Bing Haberler'; 'Microsoft.BingFinance' = 'Bing Finans'; 'Microsoft.BingSports' = 'Bing Spor'
+    'Microsoft.BingSearch' = 'Bing Arama'; 'Microsoft.BingWeather' = 'Hava Durumu'; 'Microsoft.GetHelp' = 'Yardım Alın'
+    'Microsoft.Getstarted' = 'İpuçları'; 'Microsoft.MicrosoftSolitaireCollection' = 'Solitaire'
+    'Microsoft.WindowsFeedbackHub' = 'Geri Bildirim Merkezi'; 'Microsoft.MixedReality.Portal' = 'Mixed Reality'
+    'Microsoft.3DBuilder' = '3D Builder'; 'Microsoft.Microsoft3DViewer' = '3D Görüntüleyici'; 'Microsoft.Print3D' = 'Print 3D'
+    'Clipchamp.Clipchamp' = 'Clipchamp'; 'Microsoft.PowerAutomateDesktop' = 'Power Automate'; 'Microsoft.Windows.DevHome' = 'Dev Home'
+    '7EE7776C.LinkedInforWindows' = 'LinkedIn'; 'Microsoft.SkypeApp' = 'Skype'; 'Microsoft.People' = 'Kişiler'
+    'Microsoft.Wallet' = 'Wallet'; 'Microsoft.Messaging' = 'Mesajlaşma'; 'Microsoft.Office.Sway' = 'Sway'
+    'Microsoft.OneConnect' = 'Mobil Planlar'; 'Microsoft.MicrosoftOfficeHub' = 'Microsoft 365 (Office)'
+    'Microsoft.549981C3F5F10' = 'Cortana'; 'Microsoft.WindowsMaps' = 'Haritalar'; 'Microsoft.Todos' = 'To Do'
+    'Microsoft.Office.OneNote' = 'OneNote'; 'Microsoft.Copilot' = 'Copilot'; 'MicrosoftCorporationII.MicrosoftFamily' = 'Aile Güvenliği'
+    'SpotifyAB.SpotifyMusic' = 'Spotify'; 'Disney.37853FC22B2CE' = 'Disney+'
+    'Microsoft.GamingApp' = 'Xbox'; 'Microsoft.XboxGamingOverlay' = 'Xbox Game Bar'; 'Microsoft.XboxGameOverlay' = 'Xbox Game Overlay'
+    'Microsoft.XboxIdentityProvider' = 'Xbox Kimlik Sağlayıcı'; 'Microsoft.XboxSpeechToTextOverlay' = 'Xbox Konuşmayı Metne Dönüştürme'
+    'Microsoft.Xbox.TCUI' = 'Xbox TCUI'; 'Microsoft.YourPhone' = 'Telefon Bağlantısı'; 'MicrosoftWindows.CrossDevice' = 'Cihazlar Arası Deneyim'
+    'Microsoft.ZuneMusic' = 'Media Player'; 'Microsoft.ZuneVideo' = 'Filmler ve TV'; 'Microsoft.WindowsAlarms' = 'Saat'
+    'Microsoft.WindowsCamera' = 'Kamera'; 'Microsoft.WindowsSoundRecorder' = 'Ses Kaydedici'; 'Microsoft.MicrosoftStickyNotes' = 'Yapışkan Notlar'
+    'Microsoft.OutlookForWindows' = 'Outlook'; 'MSTeams' = 'Teams'; 'MicrosoftCorporationII.QuickAssist' = 'Hızlı Yardım'
+    'MicrosoftWindows.Client.WebExperience' = 'Widgets'; 'Microsoft.WidgetsPlatformRuntime' = 'Widgets Platformu'
+    'Microsoft.OneDriveSync' = 'OneDrive'; 'Microsoft.WindowsCalculator' = 'Hesap Makinesi'; 'Microsoft.WindowsNotepad' = 'Not Defteri'
+    'Microsoft.Paint' = 'Paint'; 'Microsoft.ScreenSketch' = 'Ekran Alıntısı Aracı'; 'Microsoft.Windows.Photos' = 'Fotoğraflar'
+}
+
+function Get-ShortAppName([string]$Name) {
+    if ($AppLabels.ContainsKey($Name)) { return $AppLabels[$Name] }
+    if ($Name -like 'king.com.*') { return 'Candy Crush' }
+    $Name -replace '^(MicrosoftWindows|MicrosoftCorporationII|Microsoft)\.', ''
+}
+
+# Kaldırılacakları önceden hesaplar: plan bu listeyi onaydan önce gösterir, adım tam olarak bunu kaldırır.
+function Get-BloatTargets([string]$DebloatLevel, [string[]]$Extra = @()) {
+    $provisioned = @()
+    try {
+        $provisioned = @(foreach ($pkg in Get-AppxProvisionedPackage -Online -ErrorAction Stop) {
+            $parts = $pkg.PackageName -split '_'
+            $family = "$($parts[0])_$($parts[-1])"
+            if (Test-ShouldRemove $pkg.DisplayName $family $DebloatLevel $Extra) {
+                [pscustomobject]@{ Name = $pkg.DisplayName; Family = $family; PackageName = $pkg.PackageName }
+            }
+        })
+    } catch { }
+    $all = try { Get-AppxPackage -AllUsers -ErrorAction Stop } catch { Get-AppxPackage }
+    $installed = @($all | Where-Object { -not $_.IsFramework -and -not $_.NonRemovable -and $_.SignatureKind -ne 'System' } |
+        Sort-Object PackageFullName -Unique |
+        Where-Object { Test-ShouldRemove $_.Name $_.PackageFamilyName $DebloatLevel $Extra })
+
+    $names = @(@($installed | ForEach-Object Name) + @($provisioned | ForEach-Object Name) |
+        ForEach-Object { Get-ShortAppName $_ } | Sort-Object -Unique)
+    if (Test-Path -LiteralPath $CopilotKey) { $names += 'Copilot (Win32)' }
+    [pscustomobject]@{ Provisioned = $provisioned; Installed = $installed; Names = $names }
+}
+
 # Copilot artık Store uygulamasının yanında Edge gibi ayrı bir Win32 program olarak da geliyor.
 function Remove-CopilotApp {
-    $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Copilot'
-    $uninstall = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue).UninstallString
+    $uninstall = (Get-ItemProperty -LiteralPath $CopilotKey -ErrorAction SilentlyContinue).UninstallString
     if ($uninstall -match '^"([^"]+)"\s*(.*)$') {
         Get-Process -Name '*copilot*' -ErrorAction SilentlyContinue | Stop-Process -Force
         Start-Process -FilePath $Matches[1] -ArgumentList "$($Matches[2]) --force-uninstall" -Wait -WindowStyle Hidden
-        if (Test-Path -LiteralPath $key) { Write-Warn 'Copilot (Win32) kaldırılamadı' } else { Write-Ok 'Kaldırıldı: Copilot (Win32)' }
+        if (Test-Path -LiteralPath $CopilotKey) { Write-Warn 'Copilot (Win32) kaldırılamadı' } else { Write-Ok 'Kaldırıldı: Copilot (Win32)' }
     }
     # EdgeUpdate Copilot'u tekrar kurmasın
     Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate' 'Install{C50565E9-CCCF-44B4-BA15-5AC5C6569197}' 0
@@ -197,36 +252,29 @@ function Remove-CopilotApp {
     Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 1
 }
 
-# Extra: bu profilde ayrıca kaldırılacak paketler
-function Remove-Bloatware([string]$DebloatLevel, [string[]]$Extra = @()) {
+function Remove-Bloatware($Targets) {
+    if ($Targets.Names.Count -eq 0) { Write-Info 'Kaldırılacak uygulama yok, sistem zaten temiz' }
     $deprovisioned = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Deprovisioned'
 
-    # Yeni kullanıcılar için (provisioned)
-    foreach ($pkg in Get-AppxProvisionedPackage -Online) {
-        $parts = $pkg.PackageName -split '_'
-        $family = "$($parts[0])_$($parts[-1])"
-        if (-not (Test-ShouldRemove $pkg.DisplayName $family $DebloatLevel $Extra)) { continue }
+    # Yeni açılacak hesaplar için (provisioned)
+    foreach ($pkg in $Targets.Provisioned) {
         try {
             Remove-AppxProvisionedPackage -Online -PackageName $pkg.PackageName -AllUsers -ErrorAction Stop | Out-Null
             # Windows özellik güncellemesinden sonra geri yüklenmesin
-            if (-not (Test-Path "$deprovisioned\$family")) { New-Item -Path "$deprovisioned\$family" -Force | Out-Null }
-            Write-Ok "Kaldırıldı (provisioned): $($pkg.DisplayName)"
+            if (-not (Test-Path "$deprovisioned\$($pkg.Family)")) { New-Item -Path "$deprovisioned\$($pkg.Family)" -Force | Out-Null }
+            Write-Ok "Kaldırıldı (yeni hesaplar): $(Get-ShortAppName $pkg.Name)"
         } catch {
-            Write-Warn "Kaldırılamadı (provisioned): $($pkg.DisplayName)"
+            Write-Warn "Kaldırılamadı (yeni hesaplar): $(Get-ShortAppName $pkg.Name)"
         }
     }
 
     # Mevcut tüm kullanıcılar için
-    $installed = Get-AppxPackage -AllUsers | Where-Object {
-        -not $_.IsFramework -and -not $_.NonRemovable -and $_.SignatureKind -ne 'System'
-    } | Sort-Object PackageFullName -Unique
-    foreach ($pkg in $installed) {
-        if (-not (Test-ShouldRemove $pkg.Name $pkg.PackageFamilyName $DebloatLevel $Extra)) { continue }
+    foreach ($pkg in $Targets.Installed) {
         try {
             Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
-            Write-Ok "Kaldırıldı: $($pkg.Name)"
+            Write-Ok "Kaldırıldı: $(Get-ShortAppName $pkg.Name)"
         } catch {
-            Write-Warn "Kaldırılamadı: $($pkg.Name)"
+            Write-Warn "Kaldırılamadı: $(Get-ShortAppName $pkg.Name)"
         }
     }
 
@@ -268,16 +316,28 @@ function Protect-Debloat([string]$DebloatLevel) {
     if ($DebloatLevel -eq 'Full') {
         Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Chat' 'ChatIcon' 3
     }
-    Write-Ok 'Geri yükleme koruması uygulandı'
+    Write-Ok 'Kaldırılanların geri gelmesi engellendi (Windows güncellemeleri, yeni hesaplar, önerilen uygulama kurulumları)'
+}
+
+function Test-OneDriveInstalled {
+    $keys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OneDriveSetup.exe',
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\OneDriveSetup.exe',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\OneDriveSetup.exe'
+    [bool]($keys | Where-Object { Test-Path -LiteralPath $_ })
 }
 
 function Remove-OneDrive {
-    Stop-Process -Name OneDrive -Force -ErrorAction SilentlyContinue
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        winget uninstall --id Microsoft.OneDrive --exact --silent --accept-source-agreements --disable-interactivity | Out-Null
-    }
-    foreach ($setup in "$env:SystemRoot\System32\OneDriveSetup.exe", "$env:SystemRoot\SysWOW64\OneDriveSetup.exe") {
-        if (Test-Path $setup) { Start-Process $setup -ArgumentList '/uninstall' -Wait -WindowStyle Hidden }
+    if (Test-OneDriveInstalled) {
+        Stop-Process -Name OneDrive -Force -ErrorAction SilentlyContinue
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            winget uninstall --id Microsoft.OneDrive --exact --silent --accept-source-agreements --disable-interactivity | Out-Null
+        }
+        foreach ($setup in "$env:SystemRoot\System32\OneDriveSetup.exe", "$env:SystemRoot\SysWOW64\OneDriveSetup.exe") {
+            if (Test-Path $setup) { Start-Process $setup -ArgumentList '/uninstall' -Wait -WindowStyle Hidden }
+        }
+        if (Test-OneDriveInstalled) { Write-Warn 'OneDrive kaldırılamadı' } else { Write-Ok 'Kaldırıldı: OneDrive' }
+    } else {
+        Write-Info 'OneDrive zaten kurulu değil'
     }
     # Yeni kullanıcılarda ilk girişte kurulmasın
     Invoke-DefaultUserHive {
@@ -286,44 +346,52 @@ function Remove-OneDrive {
     }
     Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive' 'DisableFileSyncNGSC' 1
     Get-ScheduledTask -TaskName 'OneDrive*' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
-    Write-Ok 'OneDrive kaldırıldı'
+    Write-Ok 'OneDrive''ın yeni hesaplarda kurulması engellendi'
 }
 
+$CapabilityPatterns = @(
+    'App.StepsRecorder*', 'MathRecognizer*', 'Microsoft.Windows.WordPad*', 'Browser.InternetExplorer*',
+    'Hello.Face*', 'Microsoft.Windows.PowerShell.ISE*', 'Media.WindowsMediaPlayer*', 'XPS.Viewer*',
+    'Microsoft.Wallpapers.Extended*', 'App.Support.QuickAssist*'
+)
+$OptionalFeatureNames = @('Recall', 'WorkFolders-Client', 'Printing-XPSServices-Features',
+    'MicrosoftWindowsPowerShellV2Root', 'MicrosoftWindowsPowerShellV2')
+
 function Remove-OptionalComponents {
-    $capabilities = @(
-        'App.StepsRecorder*', 'MathRecognizer*', 'Microsoft.Windows.WordPad*', 'Browser.InternetExplorer*',
-        'Hello.Face*', 'Microsoft.Windows.PowerShell.ISE*', 'Media.WindowsMediaPlayer*', 'XPS.Viewer*',
-        'Microsoft.Wallpapers.Extended*', 'App.Support.QuickAssist*'
-    )
+    $done = 0
+    Write-Info 'Yüklü bileşenler taranıyor...'
     foreach ($cap in Get-WindowsCapability -Online | Where-Object { $_.State -eq 'Installed' }) {
-        if (-not (Test-NameLike $cap.Name $capabilities)) { continue }
+        if (-not (Test-NameLike $cap.Name $CapabilityPatterns)) { continue }
+        $name = $cap.Name -replace '~.*$', ''
+        Write-Info "Kaldırılıyor: $name"
         try {
             Remove-WindowsCapability -Online -Name $cap.Name -ErrorAction Stop | Out-Null
-            Write-Ok "Kaldırıldı (capability): $($cap.Name)"
+            Write-Ok "Kaldırıldı: $name"
+            $done++
         } catch {
-            Write-Warn "Kaldırılamadı (capability): $($cap.Name)"
+            Write-Warn "Kaldırılamadı: $name"
         }
     }
 
-    $features = @('Recall', 'WorkFolders-Client', 'Printing-XPSServices-Features',
-        'MicrosoftWindowsPowerShellV2Root', 'MicrosoftWindowsPowerShellV2')
-    foreach ($f in $features) {
+    foreach ($f in $OptionalFeatureNames) {
         $feature = Get-WindowsOptionalFeature -Online -FeatureName $f -ErrorAction SilentlyContinue
         if (-not $feature -or $feature.State -ne 'Enabled') { continue }
         try {
             Disable-WindowsOptionalFeature -Online -FeatureName $f -NoRestart -WarningAction SilentlyContinue -ErrorAction Stop | Out-Null
             Write-Ok "Kapatıldı (özellik): $f"
+            $done++
         } catch {
             Write-Warn "Kapatılamadı (özellik): $f"
         }
     }
+    if ($done -eq 0) { Write-Info 'Kaldırılacak bileşen yok, hepsi zaten kaldırılmış' }
 }
 
 # Edge kaldırılır, WebView2 kalır (launcher'lar ve Discord ona ihtiyaç duyar).
 function Remove-Edge {
     Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
-    $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge'
-    $uninstall = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue).UninstallString
+    $uninstall = (Get-ItemProperty -LiteralPath $EdgeKey -ErrorAction SilentlyContinue).UninstallString
+    $wasInstalled = [bool]$uninstall
 
     if ($uninstall -match '^"([^"]+)"\s*(.*)$') {
         $setupExe = $Matches[1]
@@ -355,11 +423,14 @@ function Remove-Edge {
     )
     Remove-Item $shortcuts -Force -ErrorAction SilentlyContinue
 
-    if (Test-Path -LiteralPath $key) {
+    if (-not $wasInstalled) {
+        Write-Info 'Edge zaten kurulu değil'
+    } elseif (Test-Path -LiteralPath $EdgeKey) {
         Write-Warn 'Edge kaldırılamadı (Microsoft yöntemi değiştirmiş olabilir)'
     } else {
-        Write-Ok 'Edge kaldırıldı, WebView2 duruyor'
+        Write-Ok 'Kaldırıldı: Microsoft Edge (WebView2 duruyor)'
     }
+    Write-Ok 'Edge''in tekrar kurulması engellendi'
 }
 
 #endregion
@@ -783,16 +854,50 @@ function Install-PersonalEnvironment {
 
 #region Profiller
 
-function New-Step([string]$Name, [scriptblock]$Action) {
-    [pscustomobject]@{ Name = $Name; Action = $Action }
+# Details onaydan önce adımın altında gösterilir; Data adımın Action'ına parametre olarak verilir.
+function New-Step([string]$Name, [scriptblock]$Action, [string[]]$Details = @(), $Data = $null) {
+    [pscustomobject]@{ Name = $Name; Action = $Action; Details = $Details; Data = $Data }
+}
+
+function New-DebloatStep([string]$Name, [string]$DebloatLevel, [string[]]$Extra = @()) {
+    $targets = Get-BloatTargets $DebloatLevel $Extra
+    $list = if ($targets.Names.Count) { "Kaldırılacak ($($targets.Names.Count)): " + ($targets.Names -join ', ') } else { 'Kaldırılacak uygulama yok, sistem zaten temiz' }
+    New-Step $Name { param($step) Remove-Bloatware $step.Data.Targets; Protect-Debloat $step.Data.Level } @(
+        $list, 'Ayrıca kaldırılanların Windows güncellemeleriyle ve yeni hesaplarda geri gelmesi engellenir'
+    ) @{ Targets = $targets; Level = $DebloatLevel }
+}
+
+function Get-EdgeStepDetails {
+    if (Test-Path -LiteralPath $EdgeKey) { 'Kaldırılacak: Microsoft Edge' } else { 'Edge zaten kurulu değil, sadece tekrar kurulması engellenir' }
+}
+
+function Get-OneDriveStepDetails {
+    if (Test-OneDriveInstalled) { 'Kaldırılacak: OneDrive' } else { 'OneDrive zaten kurulu değil, sadece yeni hesaplarda kurulması engellenir' }
+}
+
+$OptionalComponentsDetails = 'Yüklüyse kaldırılır: Steps Recorder, Math Recognizer, WordPad, Internet Explorer modu, Hello yüz tanıma, PowerShell ISE, eski Media Player, XPS Viewer, ek duvar kağıtları, Recall, Work Folders, XPS yazdırma, PowerShell 2.0'
+
+function Write-Wrapped([string]$Text, [string]$Indent = '        ') {
+    $console = try { [Console]::WindowWidth } catch { 120 }
+    $width = [Math]::Max(60, $console - $Indent.Length - 2)
+    $line = ''
+    foreach ($word in $Text -split ' ') {
+        if ($line -and ($line.Length + $word.Length + 1) -gt $width) {
+            Write-Host "$Indent$line" -ForegroundColor DarkGray
+            $line = $word
+        } else {
+            $line = if ($line) { "$line $word" } else { $word }
+        }
+    }
+    if ($line) { Write-Host "$Indent$line" -ForegroundColor DarkGray }
 }
 
 function Get-Plan([string]$Selected, [string]$DebloatLevel) {
     switch ($Selected) {
         'Gaming' {
-            New-Step 'Debloat (Full): hesap makinesi, notepad, terminal, ekran alıntısı, Store, fotoğraflar, paint ve codec''ler hariç her şey' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
-            New-Step 'Edge kaldır (WebView2 kalır)' { Remove-Edge }
-            New-Step 'OneDrive kaldır' { Remove-OneDrive }
+            New-DebloatStep 'Debloat (Full): hesap makinesi, notepad, terminal, ekran alıntısı, Store, fotoğraflar, paint ve codec''ler hariç her şey' 'Full'
+            New-Step 'Edge kaldır (WebView2 kalır)' { Remove-Edge } @(Get-EdgeStepDetails)
+            New-Step 'OneDrive kaldır' { Remove-OneDrive } @(Get-OneDriveStepDetails)
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
@@ -809,10 +914,10 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
-            New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
+            New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents } @($OptionalComponentsDetails)
         }
         'Work' {
-            New-Step 'Debloat (Standart + Widgets): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' { Remove-Bloatware 'Standard' @('MicrosoftWindows.Client.WebExperience'); Protect-Debloat 'Standard' }
+            New-DebloatStep 'Debloat (Standart + Widgets): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' 'Standard' @('MicrosoftWindows.Client.WebExperience')
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
@@ -825,8 +930,8 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
         }
         'VM' {
-            New-Step 'Debloat (Full): Edge dahil kalanlar korunur' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
-            New-Step 'OneDrive kaldır' { Remove-OneDrive }
+            New-DebloatStep 'Debloat (Full): Edge dahil kalanlar korunur' 'Full'
+            New-Step 'OneDrive kaldır' { Remove-OneDrive } @(Get-OneDriveStepDetails)
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
@@ -836,10 +941,10 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
-            New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
+            New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents } @($OptionalComponentsDetails)
         }
         'Standard' {
-            New-Step 'Debloat (Standart): sadece çöp uygulamalar, Xbox/Edge/Store ve günlük uygulamalar kalır' { Remove-Bloatware 'Standard'; Protect-Debloat 'Standard' }
+            New-DebloatStep 'Debloat (Standart): sadece çöp uygulamalar, Xbox/Edge/Store ve günlük uygulamalar kalır' 'Standard'
             New-Step 'Reklam, öneri, ipucu ve telemetri kapalı' { Set-PrivacyTweaks }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Görev çubuğu sadeleştirme (arama simge olarak kalır)' { Set-TaskbarTweaks 1 }
@@ -848,11 +953,11 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
         }
         'Debloat' {
             if ($DebloatLevel -eq 'Full') {
-                New-Step 'Debloat (Full): hesap makinesi, notepad, terminal, ekran alıntısı, Store, Edge, fotoğraflar, paint ve codec''ler hariç her şey' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
-                New-Step 'OneDrive kaldır' { Remove-OneDrive }
-                New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
+                New-DebloatStep 'Debloat (Full): hesap makinesi, notepad, terminal, ekran alıntısı, Store, Edge, fotoğraflar, paint ve codec''ler hariç her şey' 'Full'
+                New-Step 'OneDrive kaldır' { Remove-OneDrive } @(Get-OneDriveStepDetails)
+                New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents } @($OptionalComponentsDetails)
             } else {
-                New-Step 'Debloat (Standart): sadece çöp uygulamalar, tüm kullanıcılardan ve yeni kullanıcılardan' { Remove-Bloatware 'Standard'; Protect-Debloat 'Standard' }
+                New-DebloatStep 'Debloat (Standart): sadece çöp uygulamalar, tüm kullanıcılardan ve yeni kullanıcılardan' 'Standard'
             }
         }
     }
@@ -936,11 +1041,16 @@ function Invoke-Winsetup {
         $debloatLevel = if ($interactive) { Read-LevelChoice } else { 'Standard' }
     }
 
+    Write-Host ''
+    Write-Info 'Sistem taranıyor...'
     $plan = @(Get-Plan $selected $debloatLevel)
     Write-Host ''
     Write-Host "  Profil: $($ProfileNames[$selected])" -ForegroundColor Cyan
     Write-Host '  Yapılacaklar:' -ForegroundColor Cyan
-    for ($i = 0; $i -lt $plan.Count; $i++) { Write-Host ("  {0,2}. {1}" -f ($i + 1), $plan[$i].Name) }
+    for ($i = 0; $i -lt $plan.Count; $i++) {
+        Write-Host ("  {0,2}. {1}" -f ($i + 1), $plan[$i].Name)
+        foreach ($d in $plan[$i].Details) { Write-Wrapped $d }
+    }
     Write-Host ''
     if ($DryRun) { return }
 
@@ -961,7 +1071,7 @@ function Invoke-Winsetup {
             Write-Host ''
             Write-Host ("[{0}/{1}] {2}" -f ($i + 1), $plan.Count, $plan[$i].Name) -ForegroundColor Cyan
             try {
-                & $plan[$i].Action
+                & $plan[$i].Action $plan[$i]
             } catch {
                 Write-Warn "Adım hata verdi: $($_.Exception.Message)"
             }
