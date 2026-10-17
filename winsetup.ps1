@@ -480,13 +480,14 @@ public static extern int SHLoadIndirectString(string pszSource, System.Text.Stri
     $map
 }
 
-# Başlat menüsünde klasör kalmaz, tüm kısayollar en üst düzeye taşınır; görünüm liste olur.
+# Program klasörleri (Git, Steam...) düzleştirilir, kısayollar en üst düzeye taşınır; görünüm liste olur.
 function Set-FlatStartMenu {
     $junk = '(?i)^uninstall|release notes|\bfaq|support center|readme|web ?site|documentation|license'
+    # Windows'un kendi klasörleri (Windows Tools, Erişilebilirlik...) yerinde kalır; Startup ise açılışta çalışanların klasörü
+    $windowsFolders = 'Startup', 'Administrative Tools', 'System Tools', 'Accessibility', 'Accessories', 'Maintenance', 'Windows PowerShell'
     $roots = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
     foreach ($root in $roots) {
-        # Startup Başlat menüsü klasörü değil, açılışta çalışan programlar; dokunulmaz
-        foreach ($dir in Get-ChildItem -LiteralPath $root -Directory -Force | Where-Object { $_.Name -ne 'Startup' }) {
+        foreach ($dir in Get-ChildItem -LiteralPath $root -Directory -Force | Where-Object { $windowsFolders -notcontains $_.Name }) {
             # -Include, 5.1'de -LiteralPath ile çalışmıyor; uzantıyla süzülür
             $shortcuts = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Force | Where-Object { $_.Extension -in '.lnk', '.url' }
             foreach ($file in $shortcuts) {
@@ -769,7 +770,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Kilit ekranı ve hesap resimleri siyah' { Set-BlackLockScreen }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
-            New-Step 'Başlat menüsü: klasörsüz, liste görünümü (Uninstall/Readme gibi bağlantılar silinir)' { Set-FlatStartMenu }
+            New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
             New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
         }
         'Work' {
@@ -781,7 +782,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Uygulamalar: 7-Zip, Firefox' { Install-Apps @('7zip.7zip', 'Mozilla.Firefox') }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
-            New-Step 'Başlat menüsü: klasörsüz, liste görünümü (Uninstall/Readme gibi bağlantılar silinir)' { Set-FlatStartMenu }
+            New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
         }
         'VM' {
             New-Step 'Debloat (Full): Edge dahil kalanlar korunur' { Remove-Bloatware 'Full'; Protect-Debloat 'Full' }
@@ -792,7 +793,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
-            New-Step 'Başlat menüsü: klasörsüz, liste görünümü (Uninstall/Readme gibi bağlantılar silinir)' { Set-FlatStartMenu }
+            New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
             New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents }
         }
         'Standard' {
