@@ -4,6 +4,10 @@
 #   & ([scriptblock]::Create((irm gokhanturk.com/win))) -Profile Gaming -Yes
 #   & ([scriptblock]::Create((irm gokhanturk.com/win))) -Profile Debloat -Level Full -Yes
 
+# Tüm script ayrı bir kapsamda çalışır: irm | iex ile çalışınca param bloğu kullanıcının oturumunda
+# çalışır ve -Profile otomatik $PROFILE değişkeniyle çakışır; ayrıca fonksiyonlar oturuma sızmaz.
+& {
+
 param(
     [ValidateSet('Gaming', 'Work', 'VM', 'Standard', 'Debloat')]
     [string]$Profile,
@@ -23,14 +27,14 @@ $ScriptUrl = "$RepoRaw/winsetup.ps1"
 $LogPath = Join-Path $env:TEMP 'Winsetup.log'
 $DataDir = Join-Path $env:LOCALAPPDATA 'Winsetup'
 $MachineDataDir = Join-Path $env:ProgramData 'Winsetup'
-$script:Warnings = 0
+$State = @{ Warnings = 0 }
 
 #region Yardımcılar
 
 function Write-Info([string]$Message) { Write-Host "  $Message" -ForegroundColor Gray }
 function Write-Ok([string]$Message) { Write-Host "  $Message" -ForegroundColor Green }
 function Write-Warn([string]$Message) {
-    $script:Warnings++
+    $State.Warnings++
     Write-Host "  UYARI: $Message" -ForegroundColor Yellow
 }
 
@@ -1082,8 +1086,8 @@ function Invoke-Winsetup {
     }
 
     Write-Host ''
-    if ($script:Warnings -gt 0) {
-        Write-Host "  Bitti, $($script:Warnings) uyarı var. Ayrıntılar: $LogPath" -ForegroundColor Yellow
+    if ($State.Warnings -gt 0) {
+        Write-Host "  Bitti, $($State.Warnings) uyarı var. Ayrıntılar: $LogPath" -ForegroundColor Yellow
     } else {
         Write-Host "  Bitti. Log: $LogPath" -ForegroundColor Green
     }
@@ -1109,3 +1113,4 @@ if (-not $DryRun -and (-not (Test-Admin) -or $PSVersionTable.PSEdition -ne 'Desk
 } else {
     Invoke-Winsetup
 }
+} @args
