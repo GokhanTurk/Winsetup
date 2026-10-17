@@ -417,6 +417,30 @@ function Set-TurkishRegion {
     }
 }
 
+# Dil listesindeki her dilin klavyesi sadece Türkçe Q olur (arayüz dili değişmez).
+function Set-TurkishKeyboard {
+    try {
+        $list = Get-WinUserLanguageList
+        foreach ($lang in $list) {
+            $prefix = @($lang.InputMethodTips)[0] -replace ':.*$', ''
+            if (-not $prefix) { continue }
+            $lang.InputMethodTips.Clear()
+            $lang.InputMethodTips.Add("${prefix}:0000041F")
+        }
+        Set-WinUserLanguageList $list -Force -WarningAction SilentlyContinue
+
+        # Görev çubuğunda kalan hayalet "ENG US": US düzenini ekleyip kaldırmak yüklü düzenleri sıfırlar
+        $us = (@($list[0].InputMethodTips)[0] -replace ':.*$', '') + ':00000409'
+        $list[0].InputMethodTips.Add($us)
+        Set-WinUserLanguageList $list -Force -WarningAction SilentlyContinue
+        [void]$list[0].InputMethodTips.Remove($us)
+        Set-WinUserLanguageList $list -Force -WarningAction SilentlyContinue
+        Write-Ok 'Klavye sadece Türkçe Q'
+    } catch {
+        Write-Warn "Klavye ayarlanamadı: $($_.Exception.Message)"
+    }
+}
+
 function Set-FileExtensionsVisible {
     Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'HideFileExt' 0
     Write-Ok 'Dosya uzantıları görünür'
@@ -771,6 +795,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'OneDrive kaldır' { Remove-OneDrive }
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
+            New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arka plan uygulamaları kapalı' { Disable-BackgroundApps }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
@@ -790,6 +815,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Debloat (Standart + Widgets): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' { Remove-Bloatware 'Standard' @('MicrosoftWindows.Client.WebExperience'); Protect-Debloat 'Standard' }
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
+            New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
             New-Step 'Hızlı başlatma / hazırda bekletme kapalı' { Disable-FastBoot }
@@ -803,6 +829,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'OneDrive kaldır' { Remove-OneDrive }
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
+            New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
             New-Step 'Arka plan uygulamaları kapalı' { Disable-BackgroundApps }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
