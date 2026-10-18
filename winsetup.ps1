@@ -125,9 +125,15 @@ function Initialize-Winget {
     [bool](Get-Command winget -ErrorAction SilentlyContinue)
 }
 
+# winget'in sessiz kurulum parametrelerine eklenecek kurucu parametreleri.
+# Git: /COMPONENTS varsayılan listeden sağ tık menüsü (ext, ext\shellhere, ext\guihere) çıkarılmış hali;
+# kurucu seçimi hatırlar, güncellemelerde menü geri gelmez.
+$WingetCustom = @{ 'Git.Git' = '/COMPONENTS=gitlfs,assoc,assoc_sh,scalar' }
+
 function Install-WingetPackage([string]$Id) {
     Write-Info "Kuruluyor: $Id"
-    winget install --id $Id --exact --silent --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+    $extra = if ($WingetCustom.ContainsKey($Id)) { @('--custom', $WingetCustom[$Id]) } else { @() }
+    winget install --id $Id --exact --silent --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity @extra | Out-Null
     # 0x8A15002B: güncelleme yok, 0x8A150061: zaten kurulu
     if ($LASTEXITCODE -in 0, -1978335189, -1978335135) {
         Write-Ok "Tamam: $Id"
@@ -848,6 +854,7 @@ function Get-ToolStepDetails($Tools) {
     if ($missing.Count) { "Kurulacak: " + (($missing | ForEach-Object { $Tools[$_] }) -join ', ') }
     if ($installed.Count) { "Zaten kurulu, sadece config: " + ($installed -join ', ') }
     if (-not (Test-NerdFontInstalled)) { 'Kurulacak: FiraCode Nerd Font' }
+    if ('Git.Git' -in $missing) { 'Git sağ tık menüsü (Open Git Bash/GUI here) olmadan kurulur' }
 }
 
 function Install-Tools($Tools) {
