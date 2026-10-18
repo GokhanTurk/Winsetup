@@ -39,6 +39,8 @@ irm gokhanturk.com/uninstall | iex
 | `VM` | Full debloat, kişisel ortam |
 | `Standard` | Genel kullanıcı: çöp uygulamalar, reklamlar, ipuçları ve telemetri |
 | `Debloat` | Sadece uygulama kaldırma |
+| `Neovim` | Neovim + git + ripgrep + FiraCode Nerd Font ve config; kurulu olanlar atlanır, 0.12'den eski Neovim güncellenir |
+| `Terminal` | Sadece kişisel terminal ve CLI ortamı + configler; kurulu olanlar atlanır |
 
 **Kişisel ortam:** PowerShell 7, Windows Terminal, FiraCode Nerd Font, zoxide, starship, fzf, eza, bat, ripgrep, fd, fastfetch, git, gh, neovim + [dotfiles](https://github.com/GokhanTurk/dotfiles)
 
@@ -46,10 +48,11 @@ irm gokhanturk.com/uninstall | iex
 
 | Parametre | |
 | --- | --- |
-| `-Profile` | `Gaming`, `Work`, `VM`, `Standard`, `Debloat` |
+| `-Profile` | `Gaming`, `Work`, `VM`, `Standard`, `Debloat`, `Neovim`, `Terminal` |
 | `-Level` | `Standard` (varsayılan) veya `Full`; sadece `Debloat` profilinde |
 | `-Yes` | Soru sormaz, geri yükleme noktası oluşturmaz, yeniden başlatmaz |
 | `-DryRun` | Sadece yapılacakları listeler |
+| `-NoLogo` | `-Yes` ile terminal arka planına BJK logosu konmaz (etkileşimli kurulumda sorulur) |
 
 ## Debloat seviyeleri
 

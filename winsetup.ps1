@@ -9,11 +9,13 @@
 & {
 
 param(
-    [ValidateSet('Gaming', 'Work', 'VM', 'Standard', 'Debloat')]
+    [ValidateSet('Gaming', 'Work', 'VM', 'Standard', 'Debloat', 'Neovim', 'Terminal')]
     [string]$Profile,
     [ValidateSet('Standard', 'Full')]
     [string]$Level,
     [switch]$Yes,
+    # -Yes ile terminal arka planına BJK logosu konmaz
+    [switch]$NoLogo,
     [switch]$DryRun,
     # Yerel klondan çalışırken config/asset dosyaları buradan kopyalanır (otomatik verilir)
     [string]$LocalRepo
@@ -820,37 +822,99 @@ function Install-NerdFont {
     Write-Ok 'FiraCode Nerd Font kuruldu'
 }
 
+function Test-NerdFontInstalled {
+    (Test-Path "$env:SystemRoot\Fonts\FiraCodeNerdFontMono-Regular.ttf") -or
+        (Test-Path "$env:LOCALAPPDATA\Microsoft\Windows\Fonts\FiraCodeNerdFontMono-Regular.ttf")
+}
+
+# winget "zaten kurulu" demek için bile paket başına birkaç saniye harcıyor;
+# komutu PATH'te bulunan araç için winget hiç çağrılmaz.
+$NeovimTools = [ordered]@{ 'Neovim.Neovim' = 'nvim'; 'Git.Git' = 'git'; 'BurntSushi.ripgrep.MSVC' = 'rg' }
+$TerminalTools = [ordered]@{
+    'Microsoft.PowerShell' = 'pwsh'; 'Microsoft.WindowsTerminal' = 'wt'; 'Git.Git' = 'git'; 'GitHub.cli' = 'gh'
+    'Neovim.Neovim' = 'nvim'; 'ajeetdsouza.zoxide' = 'zoxide'; 'Starship.Starship' = 'starship'; 'junegunn.fzf' = 'fzf'
+    'eza-community.eza' = 'eza'; 'sharkdp.bat' = 'bat'; 'BurntSushi.ripgrep.MSVC' = 'rg'; 'sharkdp.fd' = 'fd'
+    'Fastfetch-cli.Fastfetch' = 'fastfetch'
+}
+
+function Get-MissingTools($Tools) {
+    @($Tools.Keys | Where-Object { -not (Get-Command $Tools[$_] -CommandType Application -ErrorAction SilentlyContinue) })
+}
+
+function Get-ToolStepDetails($Tools) {
+    $missing = Get-MissingTools $Tools
+    $installed = @($Tools.Keys | Where-Object { $_ -notin $missing } | ForEach-Object { $Tools[$_] })
+    if ($missing.Count) { "Kurulacak: " + (($missing | ForEach-Object { $Tools[$_] }) -join ', ') }
+    if ($installed.Count) { "Zaten kurulu, sadece config: " + ($installed -join ', ') }
+    if (-not (Test-NerdFontInstalled)) { 'Kurulacak: FiraCode Nerd Font' }
+}
+
+function Install-Tools($Tools) {
+    $missing = Get-MissingTools $Tools
+    if ($missing.Count) { Install-Apps $missing } else { Write-Info 'Araçların hepsi zaten kurulu' }
+    if (Test-NerdFontInstalled) { Write-Info 'FiraCode Nerd Font zaten kurulu' } else { Install-NerdFont }
+}
+
+function Get-NeovimVersion {
+    $nvim = Get-Command nvim -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $nvim) { return $null }
+    if ((& $nvim.Source --version | Select-Object -First 1) -match 'v(\d+\.\d+\.\d+)') { [version]$Matches[1] }
+}
+
+# Config vim.pack kullanıyor, Neovim 0.12+ ister.
+function Install-NeovimConfig {
+    $version = Get-NeovimVersion
+    if ($version -and $version -lt [version]'0.12.0') {
+        Write-Info "Neovim $version eski, güncelleniyor..."
+        if (Initialize-Winget) { Install-WingetPackage 'Neovim.Neovim'; Update-SessionPath }
+        $version = Get-NeovimVersion
+        if ($version -lt [version]'0.12.0') { Write-Warn "Neovim hâlâ $version (0.12+ gerekli), plugin'ler çalışmayabilir" }
+    }
+    Save-File "$DotfilesRaw/nvim/.config/nvim/init.lua" "$env:LOCALAPPDATA\nvim\init.lua"
+    Save-File "$DotfilesRaw/nvim/.config/nvim/nvim-pack-lock.json" "$env:LOCALAPPDATA\nvim\nvim-pack-lock.json"
+}
+
+function Install-Neovim {
+    Install-Tools $NeovimTools
+    Install-NeovimConfig
+    Write-Ok 'Neovim hazır (plugin''ler ilk açılışta iner)'
+}
+
 function Install-PersonalEnvironment {
-    Install-Apps @(
-        'Microsoft.PowerShell', 'Microsoft.WindowsTerminal', 'Git.Git', 'GitHub.cli', 'Neovim.Neovim',
-        'ajeetdsouza.zoxide', 'Starship.Starship', 'junegunn.fzf', 'eza-community.eza', 'sharkdp.bat',
-        'BurntSushi.ripgrep.MSVC', 'sharkdp.fd', 'Fastfetch-cli.Fastfetch'
-    )
-    Install-NerdFont
+    Install-Tools $TerminalTools
 
     # Windows Terminal
     $wt = "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"
     Save-File "$RepoRaw/config/WindowsTerminal/settings.json" $wt
-    Save-File "$RepoRaw/assets/BJK(Terminal).png" (Join-Path $DataDir 'BJK(Terminal).png')
+    if ($State.Logo) {
+        Save-File "$RepoRaw/assets/BJK(Terminal).png" (Join-Path $DataDir 'BJK(Terminal).png')
+    } elseif (Test-Path $wt) {
+        $lines = [IO.File]::ReadAllLines($wt) | Where-Object { $_ -notmatch '"backgroundImage' }
+        [IO.File]::WriteAllLines($wt, [string[]]$lines, (New-Object Text.UTF8Encoding $false))
+        Write-Info 'Terminal arka planı logosuz'
+    }
 
     # PowerShell 7 profili
     $docs = [Environment]::GetFolderPath('MyDocuments')
     Save-File "$RepoRaw/config/PowerShell/profile.ps1" "$docs\PowerShell\Microsoft.PowerShell_profile.ps1"
-    # Store sürümü WindowsApps'te, winget/MSI sürümü Program Files'ta olur
-    $pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
-    if (-not $pwsh -and (Test-Path "$env:ProgramFiles\PowerShell\7\pwsh.exe")) { $pwsh = "$env:ProgramFiles\PowerShell\7\pwsh.exe" }
-    if ($pwsh) {
-        & $pwsh -NoProfile -Command 'Install-Module PSFzf -Scope CurrentUser -Force -Repository PSGallery' 2>&1 | Out-Null
+    if (Test-Path "$docs\PowerShell\Modules\PSFzf") {
+        Write-Info 'PSFzf zaten kurulu'
     } else {
-        Write-Warn 'PowerShell 7 bulunamadı, PSFzf kurulamadı'
+        # Store sürümü WindowsApps'te, winget/MSI sürümü Program Files'ta olur
+        $pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+        if (-not $pwsh -and (Test-Path "$env:ProgramFiles\PowerShell\7\pwsh.exe")) { $pwsh = "$env:ProgramFiles\PowerShell\7\pwsh.exe" }
+        if ($pwsh) {
+            & $pwsh -NoProfile -Command 'Install-Module PSFzf -Scope CurrentUser -Force -Repository PSGallery' 2>&1 | Out-Null
+        } else {
+            Write-Warn 'PowerShell 7 bulunamadı, PSFzf kurulamadı'
+        }
     }
 
     # dotfiles reposundan ortak configler
     Save-File "$DotfilesRaw/starship/.config/starship.toml" "$env:USERPROFILE\.config\starship.toml"
     Save-File "$DotfilesRaw/fastfetch/.config/fastfetch/config.jsonc" "$env:USERPROFILE\.config\fastfetch\config.jsonc"
     Save-File "$DotfilesRaw/bat/.config/bat/config" "$env:APPDATA\bat\config"
-    Save-File "$DotfilesRaw/nvim/.config/nvim/init.lua" "$env:LOCALAPPDATA\nvim\init.lua"
-    Save-File "$DotfilesRaw/nvim/.config/nvim/nvim-pack-lock.json" "$env:LOCALAPPDATA\nvim\nvim-pack-lock.json"
+    Install-NeovimConfig
     Write-Ok 'Kişisel terminal ortamı kuruldu'
 }
 
@@ -916,7 +980,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Defender hafif optimizasyon' { Optimize-Defender }
             New-Step 'Kilit ekranı ve hesap resimleri siyah' { Set-BlackLockScreen }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
-            New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
+            New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment } @(Get-ToolStepDetails $TerminalTools)
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
             New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents } @($OptionalComponentsDetails)
         }
@@ -930,7 +994,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Hızlı başlatma / hazırda bekletme kapalı' { Disable-FastBoot }
             New-Step 'Uygulamalar: 7-Zip, Firefox' { Install-Apps @('7zip.7zip', 'Mozilla.Firefox') }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
-            New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
+            New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment } @(Get-ToolStepDetails $TerminalTools)
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
         }
         'VM' {
@@ -943,7 +1007,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Arka plan uygulamaları kapalı' { Disable-BackgroundApps }
             New-Step 'Arayüz temizliği (klasik sağ tık, Widgets/Copilot kapalı, taskbar boş)' { Set-InterfaceCleanup }
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
-            New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment }
+            New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment } @(Get-ToolStepDetails $TerminalTools)
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
             New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents } @($OptionalComponentsDetails)
         }
@@ -964,8 +1028,18 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
                 New-DebloatStep 'Debloat (Standart): sadece çöp uygulamalar, tüm kullanıcılardan ve yeni kullanıcılardan' 'Standard'
             }
         }
+        'Neovim' {
+            New-Step 'Neovim (git, rg, FiraCode, dotfiles config; kurulu olanlar atlanır)' { Install-Neovim } @(Get-ToolStepDetails $NeovimTools)
+        }
+        'Terminal' {
+            New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment } @(Get-ToolStepDetails $TerminalTools)
+        }
     }
 }
+
+# Bu profiller sistem ayarına dokunmaz: geri yükleme noktası ve Explorer yeniden başlatma gerekmez.
+$LightProfiles = @('Neovim', 'Terminal')
+$TerminalProfiles = @('Gaming', 'Work', 'VM', 'Terminal')
 
 $ProfileNames = [ordered]@{
     Gaming   = 'Oyun'
@@ -973,6 +1047,8 @@ $ProfileNames = [ordered]@{
     VM       = 'Sanal makine'
     Standard = 'Standart (genel kullanıcı)'
     Debloat  = 'Sadece debloat'
+    Neovim   = 'Neovim'
+    Terminal = 'Terminal ortamı'
 }
 
 function Read-ProfileChoice {
@@ -983,6 +1059,8 @@ function Read-ProfileChoice {
     Write-Host '  3) Sanal makine Full debloat + kişisel ortam (Steam/oyun ayarı yok)'
     Write-Host '  4) Standart     Genel kullanıcı: sadece çöpler, reklamlar ve telemetri'
     Write-Host '  5) Debloat      Sadece uygulama kaldırma'
+    Write-Host '  6) Neovim       Neovim + config (kuruluysa sadece config)'
+    Write-Host '  7) Terminal     Tüm terminal ve CLI ortamı + configler (kurulu olanlar atlanır)'
     Write-Host '  0) Çıkış'
     while ($true) {
         switch (Read-Host '  Seçim') {
@@ -991,6 +1069,8 @@ function Read-ProfileChoice {
             '3' { return 'VM' }
             '4' { return 'Standard' }
             '5' { return 'Debloat' }
+            '6' { return 'Neovim' }
+            '7' { return 'Terminal' }
             '0' { return $null }
         }
     }
@@ -1058,10 +1138,13 @@ function Invoke-Winsetup {
     Write-Host ''
     if ($DryRun) { return }
 
+    $light = $selected -in $LightProfiles
     $createRestorePoint = $false
+    $State.Logo = -not $NoLogo
     if ($interactive) {
         if (-not (Read-YesNo 'Devam edilsin mi?')) { return }
-        $createRestorePoint = Read-YesNo 'Önce geri yükleme noktası oluşturulsun mu?'
+        if ($selected -in $TerminalProfiles) { $State.Logo = Read-YesNo 'Terminal arka planına BJK logosu konsun mu?' }
+        if (-not $light) { $createRestorePoint = Read-YesNo 'Önce geri yükleme noktası oluşturulsun mu?' }
     }
 
     Start-Transcript -Path $LogPath -Append | Out-Null
@@ -1080,7 +1163,7 @@ function Invoke-Winsetup {
                 Write-Warn "Adım hata verdi: $($_.Exception.Message)"
             }
         }
-        Restart-Explorer
+        if (-not $light) { Restart-Explorer }
     } finally {
         Stop-Transcript | Out-Null
     }
@@ -1091,7 +1174,7 @@ function Invoke-Winsetup {
     } else {
         Write-Host "  Bitti. Log: $LogPath" -ForegroundColor Green
     }
-    if ($interactive) {
+    if ($interactive -and -not $light) {
         if (Read-YesNo 'Değişikliklerin tamamı için yeniden başlatılsın mı?') { Restart-Computer -Force }
     }
 }
@@ -1102,6 +1185,7 @@ if (-not $DryRun -and (-not (Test-Admin) -or $PSVersionTable.PSEdition -ne 'Desk
     if ($Profile) { $forward += "-Profile $Profile" }
     if ($Level) { $forward += "-Level $Level" }
     if ($Yes) { $forward += '-Yes' }
+    if ($NoLogo) { $forward += '-NoLogo' }
     if ($LocalRepo) { $forward += "-LocalRepo '$LocalRepo'" }
     $forward = $forward -join ' '
     # Dosya BOM'suz UTF-8 (BOM irm | iex'i bozar); 5.1 -File ile ANSI okuyacağı için UTF-8 olarak okutuyoruz.
