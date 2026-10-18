@@ -872,12 +872,37 @@ function Install-NeovimConfig {
     }
     Save-File "$DotfilesRaw/nvim/.config/nvim/init.lua" "$env:LOCALAPPDATA\nvim\init.lua"
     Save-File "$DotfilesRaw/nvim/.config/nvim/nvim-pack-lock.json" "$env:LOCALAPPDATA\nvim\nvim-pack-lock.json"
+    Install-NeovimPlugins
+}
+
+# Config plugin'leri ilk açılışta indiriyor; burada headless açıp önceden indiriyoruz.
+function Install-NeovimPlugins {
+    $nvim = Get-Command nvim -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $nvim -or -not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Warn 'nvim veya git bulunamadı, plugin''ler ilk açılışta inecek'
+        return
+    }
+    # Önceki başarısız denemenin bıraktığı işaret varsa config plugin kurmayı denemez
+    Remove-Item "$env:LOCALAPPDATA\nvim-data\nopack" -Force -ErrorAction SilentlyContinue
+    Write-Info 'Neovim plugin''leri indiriliyor...'
+    $proc = Start-Process $nvim.Source -ArgumentList '--headless', '+qa' -NoNewWindow -PassThru
+    $done = $proc.WaitForExit(180000)
+    Write-Host '' # vim.pack ilerleme satırı satır sonu olmadan biter
+    if (-not $done) {
+        $proc.Kill()
+        Write-Warn 'Plugin indirme zaman aşımına uğradı, ilk açılışta tekrar denenecek'
+    } elseif (Test-Path "$env:LOCALAPPDATA\nvim-data\nopack") {
+        Remove-Item "$env:LOCALAPPDATA\nvim-data\nopack" -Force -ErrorAction SilentlyContinue
+        Write-Warn 'Plugin''ler indirilemedi, ilk açılışta tekrar denenecek'
+    } else {
+        Write-Ok 'Neovim plugin''leri indirildi'
+    }
 }
 
 function Install-Neovim {
     Install-Tools $NeovimTools
     Install-NeovimConfig
-    Write-Ok 'Neovim hazır (plugin''ler ilk açılışta iner)'
+    Write-Ok 'Neovim hazır'
 }
 
 function Install-PersonalEnvironment {
