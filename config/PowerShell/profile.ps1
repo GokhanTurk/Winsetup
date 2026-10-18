@@ -86,8 +86,3 @@ function myip {
         "${label}: $($ip.IPAddress)"
     }
 }
-
-# fish_greeting karşılığı
-if (Get-Command fastfetch -ErrorAction SilentlyContinue) {
-    fastfetch
-}
