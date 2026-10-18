@@ -14,6 +14,8 @@ Windows 11 tek tıkla kurulum
 irm gokhanturk.com/win | iex
 ```
 
+Profil seçildikten sonra gerekirse Windows Terminal'de yönetici penceresi açılır. Uygulama kaldıran profiller Windows PowerShell 5.1'de (Appx/DISM cmdlet'leri PowerShell 7'de çalışmıyor), `Neovim` ve `Terminal` PowerShell 7'de çalışır; zaten yönetici PowerShell 7'deysen pencere açılmaz.
+
 Sessiz (soru sormaz):
 
 ```powershell

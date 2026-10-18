@@ -22,10 +22,11 @@ param(
 )
 
 if (-not $LocalRepo -and $PSScriptRoot) { $LocalRepo = $PSScriptRoot }
+# Yönetici penceresi script'i tekrar indirmez, bu metni diskten okur (bkz. Start-Elevated)
+$SelfSource = "& {$($MyInvocation.MyCommand.ScriptBlock)} @args"
 
 $RepoRaw = 'https://raw.githubusercontent.com/GokhanTurk/Winsetup/main'
 $DotfilesRaw = 'https://raw.githubusercontent.com/GokhanTurk/dotfiles/main'
-$ScriptUrl = "$RepoRaw/winsetup.ps1"
 $LogPath = Join-Path $env:TEMP 'Winsetup.log'
 $DataDir = Join-Path $env:LOCALAPPDATA 'Winsetup'
 $MachineDataDir = Join-Path $env:ProgramData 'Winsetup'
@@ -1150,6 +1151,14 @@ function Invoke-Winsetup {
         $debloatLevel = if ($interactive) { Read-LevelChoice } else { 'Standard' }
     }
 
+    # Uygulama kaldıran profiller Windows PowerShell 5.1 ister: PS7'de Get-AppxProvisionedPackage
+    # çalışmıyor, geri yükleme noktası cmdlet'leri yok. Neovim/Terminal her PowerShell'de çalışır.
+    $needsDesktop = $selected -notin $LightProfiles
+    if (-not $DryRun -and (-not (Test-Admin) -or ($needsDesktop -and $PSVersionTable.PSEdition -ne 'Desktop'))) {
+        Start-Elevated $selected $debloatLevel $needsDesktop
+        return
+    }
+
     Write-Host ''
     Write-Info 'Sistem taranıyor...'
     $plan = @(Get-Plan $selected $debloatLevel)
@@ -1204,22 +1213,43 @@ function Invoke-Winsetup {
     }
 }
 
-# Yönetici değilsek ya da PowerShell 7'deysek (Appx modülü 5.1 ister) Windows PowerShell'de yönetici olarak yeniden başlat.
-if (-not $DryRun -and (-not (Test-Admin) -or $PSVersionTable.PSEdition -ne 'Desktop')) {
-    $forward = @()
-    if ($Profile) { $forward += "-Profile $Profile" }
-    if ($Level) { $forward += "-Level $Level" }
+# Seçilen profille yönetici penceresi açar. Script zaten indirilmiş olduğu için metni diske yazılır,
+# yeni pencere onu okur: komut satırında URL/irm ve -ExecutionPolicy olmaz (Defender bu kalıbı
+# Trojan:Win32/Commando.A!ml diye engelliyordu; execution policy -Command'ı zaten etkilemez).
+function Start-Elevated([string]$Selected, [string]$DebloatLevel, [bool]$NeedsDesktop) {
+    $dir = Join-Path $env:TEMP 'Winsetup'
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+    $file = Join-Path $dir 'winsetup.ps1'
+    [IO.File]::WriteAllText($file, $SelfSource, (New-Object Text.UTF8Encoding $false))
+
+    $forward = @("-Profile $Selected")
+    if ($DebloatLevel) { $forward += "-Level $DebloatLevel" }
     if ($Yes) { $forward += '-Yes' }
     if ($NoLogo) { $forward += '-NoLogo' }
     if ($LocalRepo) { $forward += "-LocalRepo '$LocalRepo'" }
-    $forward = $forward -join ' '
-    # Dosya BOM'suz UTF-8 (BOM irm | iex'i bozar); 5.1 -File ile ANSI okuyacağı için UTF-8 olarak okutuyoruz.
-    $source = if ($PSCommandPath) { "[IO.File]::ReadAllText('$PSCommandPath', [Text.Encoding]::UTF8)" } else { "(irm '$ScriptUrl')" }
-    $launch = "-NoProfile -ExecutionPolicy Bypass -Command `"& ([scriptblock]::Create($source)) $forward`""
-    if (-not $Yes) { $launch = "-NoExit $launch" }
-    Write-Host '  Yönetici olarak Windows PowerShell''de yeniden başlatılıyor...' -ForegroundColor Yellow
-    Start-Process powershell.exe -Verb RunAs -ArgumentList $launch
-} else {
-    Invoke-Winsetup
+    # 5.1 dosyaları ANSI okur, metin UTF-8 olarak okutulur
+    $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('$file', [Text.Encoding]::UTF8))) $($forward -join ' ')"
+
+    $shell = 'powershell.exe'
+    if (-not $NeedsDesktop) {
+        $pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pwsh) { $shell = $pwsh.Source }
+    }
+    $shellArgs = "-NoProfile -Command `"$command`""
+    if (-not $Yes) { $shellArgs = "-NoExit $shellArgs" }
+
+    $name = if ($shell -eq 'powershell.exe') { 'Windows PowerShell' } else { 'PowerShell 7' }
+    Write-Host "  Yönetici olarak $name açılıyor..." -ForegroundColor Yellow
+    try {
+        if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
+            Start-Process wt.exe -Verb RunAs -ArgumentList "new-tab --title Winsetup `"$shell`" $shellArgs" -ErrorAction Stop
+        } else {
+            Start-Process $shell -Verb RunAs -ArgumentList $shellArgs -ErrorAction Stop
+        }
+    } catch {
+        Write-Host '  Yönetici izni verilmedi.' -ForegroundColor Red
+    }
 }
+
+Invoke-Winsetup
 } @args
