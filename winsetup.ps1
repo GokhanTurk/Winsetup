@@ -22,6 +22,18 @@ param(
 )
 
 if (-not $LocalRepo -and $PSScriptRoot) { $LocalRepo = $PSScriptRoot }
+
+# Windows PowerShell 5.1 BOM'suz dosyayı ANSI okur (Türkçe karakterler bozulur); diskten çalıştırılınca
+# metin UTF-8 olarak yeniden okunup çalıştırılır. irm ile gelen ve yönetici penceresindeki kopya etkilenmez.
+if ($PSVersionTable.PSEdition -eq 'Desktop' -and $PSCommandPath) {
+    $forward = @{} + $PSBoundParameters
+    $forward.LocalRepo = $LocalRepo
+    $ast = [Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText($PSCommandPath, [Text.Encoding]::UTF8), [ref]$null, [ref]$null)
+    # Dosyadaki & { param(...) ... } bloğu
+    $body = $ast.Find({ $args[0] -is [Management.Automation.Language.ScriptBlockExpressionAst] }, $false).ScriptBlock.GetScriptBlock()
+    & $body @forward
+    return
+}
 # Yönetici penceresi script'i tekrar indirmez, bu metni diskten okur (bkz. Start-Elevated)
 $SelfSource = "& {$($MyInvocation.MyCommand.ScriptBlock)} @args"
 
@@ -1147,44 +1159,382 @@ $ProfileNames = [ordered]@{
     RSAT     = 'RSAT yönetim araçları'
 }
 
-function Read-ProfileChoice {
-    Write-Host ''
-    Write-Host '  Winsetup — profil seç' -ForegroundColor Cyan
-    Write-Host '  1) Oyun         Full debloat + Edge kaldır + oyun ayarları + Steam + kişisel ortam'
-    Write-Host '  2) İş           Standart debloat (Edge/Teams/Outlook kalır) + kişisel ortam'
-    Write-Host '  3) Sanal makine Full debloat + kişisel ortam (Steam/oyun ayarı yok)'
-    Write-Host '  4) Standart     Genel kullanıcı: sadece çöpler, reklamlar ve telemetri'
-    Write-Host '  5) Debloat      Sadece uygulama kaldırma'
-    Write-Host '  6) Neovim       Neovim + config (kuruluysa sadece config)'
-    Write-Host '  7) Terminal     Tüm terminal ve CLI ortamı + configler (kurulu olanlar atlanır)'
-    Write-Host '  8) RSAT         AD Users and Computers, AD Sites and Services, DNS, DHCP'
-    Write-Host '  0) Çıkış'
-    while ($true) {
-        switch (Read-Host '  Seçim') {
-            '1' { return 'Gaming' }
-            '2' { return 'Work' }
-            '3' { return 'VM' }
-            '4' { return 'Standard' }
-            '5' { return 'Debloat' }
-            '6' { return 'Neovim' }
-            '7' { return 'Terminal' }
-            '8' { return 'RSAT' }
-            '0' { return $null }
-        }
+#endregion
+
+#region Menü
+
+# Note rengi: Warn = sistemi değiştirir, Ok = sisteme dokunmaz, Info = bilgi
+function New-MenuItem([string]$Key, [string]$Hotkey, [string]$Label, [string]$Hint, [string[]]$Lines, [string]$Note = '', [string]$NoteKind = 'Info') {
+    [pscustomobject]@{ Key = $Key; Hotkey = $Hotkey; Label = $Label; Hint = $Hint; Lines = $Lines; Note = $Note; NoteKind = $NoteKind }
+}
+
+$SystemNote = 'Sistem ayarlarını değiştirir · yeniden başlatma önerilir'
+$LightNote = 'Sistem ayarlarına dokunmaz · kurulu araçlar atlanır'
+$DevEnvironment = 'Geliştirici ortamı: PowerShell 7, Windows Terminal, CLI araçları ve dotfiles'
+
+$ProfileMenu = @(
+    New-MenuItem 'Gaming' '1' 'Oyun' 'Full debloat + Edge kaldır + oyun ayarları + Steam + kişisel ortam' @(
+        'Full debloat: temel araçlar dışındaki Microsoft uygulamaları kaldırılır'
+        'Edge ve OneDrive kaldırılır'
+        'Oyun ayarları: timer resolution, cihaz güç tasarrufu ve Game Bar kapalı'
+        'Steam, Firefox, mpv'
+        $DevEnvironment
+    ) $SystemNote 'Warn'
+    New-MenuItem 'Work' '2' 'İş' 'Standart debloat (Edge/Teams/Outlook kalır) + OneDrive kaldır + kişisel ortam' @(
+        'Standart debloat: Edge, Teams ve Outlook kalır'
+        'OneDrive kaldırılır'
+        '7-Zip, Firefox'
+        $DevEnvironment
+    ) $SystemNote 'Warn'
+    New-MenuItem 'VM' '3' 'Sanal makine' 'Full debloat + kişisel ortam (Steam/oyun ayarı yok)' @(
+        'Full debloat: temel araçlar dışındaki Microsoft uygulamaları kaldırılır'
+        'OneDrive ve gereksiz Windows bileşenleri kaldırılır'
+        $DevEnvironment
+    ) $SystemNote 'Warn'
+    New-MenuItem 'Standard' '4' 'Standart' 'Genel kullanıcı: sadece çöpler, reklamlar ve telemetri' @(
+        'Gereksiz uygulamalar kaldırılır; Xbox, Edge ve Store kalır'
+        'Reklam, öneri ve telemetri kapatılır'
+        '7-Zip'
+    ) 'Genel kullanıcı için güvenli' 'Ok'
+    New-MenuItem 'Debloat' '5' 'Debloat' 'Sadece uygulama kaldırma' @(
+        'Yalnızca uygulama kaldırma'
+        'Standart veya Full seviye sonraki adımda seçilir'
+    ) 'Diğer ayarlara dokunmaz' 'Info'
+    New-MenuItem 'Neovim' '6' 'Neovim' 'Neovim + config (kuruluysa sadece config)' @(
+        'Neovim, git, ripgrep, FiraCode Nerd Font'
+        'dotfiles yapılandırması, plugin''ler önceden indirilir'
+    ) $LightNote 'Ok'
+    New-MenuItem 'Terminal' '7' 'Terminal' 'Tüm terminal ve CLI ortamı + configler (kurulu olanlar atlanır)' @(
+        'PowerShell 7, Windows Terminal, FiraCode Nerd Font'
+        'git, gh, neovim, starship, zoxide, fzf, eza, bat, ripgrep, fd, fastfetch'
+        'dotfiles yapılandırmaları'
+    ) $LightNote 'Ok'
+    New-MenuItem 'RSAT' '8' 'RSAT' 'AD Users and Computers, AD Sites and Services, DNS, DHCP' @(
+        'Active Directory Users and Computers'
+        'Active Directory Sites and Services'
+        'DNS ve DHCP yönetim araçları'
+    ) 'Windows Update''ten indirilir · birkaç dakika sürebilir' 'Info'
+    New-MenuItem $null '0' 'Çıkış' '' @('Hiçbir değişiklik yapmadan çık')
+)
+
+$LevelMenu = @(
+    New-MenuItem 'Standard' '1' 'Standart' 'Sadece çöp uygulamalar (genel kullanıcı için güvenli)' @(
+        'Bing uygulamaları, Copilot, Clipchamp, LinkedIn, oyunlar gibi gereksiz uygulamalar'
+        'Hesap makinesi, saat, kamera, fotoğraflar, Xbox, Edge ve Store kalır'
+    ) 'Genel kullanıcı için güvenli' 'Ok'
+    New-MenuItem 'Full' '2' 'Full' 'Microsoft uygulamalarının neredeyse hepsi (VM / minimal kurulum)' @(
+        'Microsoft uygulamalarının neredeyse hepsi kaldırılır'
+        'Hesap Makinesi, Not Defteri, Terminal, Ekran Alıntısı, Store, Fotoğraflar, Paint ve codec''ler kalır'
+        'OneDrive ve gereksiz Windows bileşenleri de kaldırılır'
+    ) 'VM ve minimal kurulumlar için' 'Warn'
+    New-MenuItem $null '0' 'Çıkış' '' @('Hiçbir değişiklik yapmadan çık')
+)
+
+$Esc = [char]27
+
+# Çizim karakterleri kod noktasından üretilir: Windows PowerShell 5.1 BOM'suz dosyayı ANSI okur ve
+# bu karakterlerin UTF-8 baytları ANSI'de tırnak işaretine dönüşüp script'i ayrıştırılamaz yapar.
+$Glyph = @{
+    H = [char]0x2500; V = [char]0x2502; TL = [char]0x256D; TR = [char]0x256E; BL = [char]0x2570; BR = [char]0x256F
+    Block = [char]0x2588; Pointer = [char]0x25B8; Bullet = [char]0x2022; Dot = [char]0x00B7
+    Up = [char]0x2191; Down = [char]0x2193; Dash = [char]0x2014
+}
+
+function Get-Fg([int[]]$Rgb) { "$Esc[38;2;$($Rgb[0]);$($Rgb[1]);$($Rgb[2])m" }
+
+# Catppuccin Mocha
+$Ui = @{
+    Text   = Get-Fg 205, 214, 244
+    Sub    = Get-Fg 166, 173, 200
+    Dim    = Get-Fg 108, 112, 134
+    Border = Get-Fg 69, 71, 90
+    Accent = Get-Fg 203, 166, 247
+    Ok     = Get-Fg 166, 227, 161
+    Warn   = Get-Fg 250, 179, 135
+    Info   = Get-Fg 137, 220, 235
+    SelBg  = "$Esc[48;2;49;50;68m"
+    Bold   = "$Esc[1m"
+    Reset  = "$Esc[0m"
+}
+
+# Banner'daki akan renk geçişi: mauve → blue → sky → pink, 96 adımlık döngü
+$GradientSteps = 96
+$Gradient = & {
+    $stops = @(@(203, 166, 247), @(137, 180, 250), @(137, 220, 235), @(245, 194, 231))
+    for ($i = 0; $i -lt $GradientSteps; $i++) {
+        $p = $i / $GradientSteps * $stops.Count
+        $a = $stops[[Math]::Floor($p)]; $b = $stops[([Math]::Floor($p) + 1) % $stops.Count]; $f = $p - [Math]::Floor($p)
+        Get-Fg @(foreach ($k in 0..2) { [int]($a[$k] + ($b[$k] - $a[$k]) * $f) })
     }
 }
 
-function Read-LevelChoice {
-    Write-Host ''
-    Write-Host '  1) Standart  Sadece çöp uygulamalar (genel kullanıcı için güvenli)'
-    Write-Host '  2) Full      Microsoft uygulamalarının neredeyse hepsi (VM / minimal kurulum)'
-    while ($true) {
-        switch (Read-Host '  Seviye') {
-            '1' { return 'Standard' }
-            '2' { return 'Full' }
-        }
+# ANSI Shadow "GÖKHAN"; Ö'nün noktaları yerine >_ simgesi çizilir.
+# Şablon: # = █, = = ═, | = ║, r = ╔, 7 = ╗, L = ╚, J = ╝
+$BannerRows = & {
+    $letters = @(
+        @(' ######7 ', '##r====J ', '##|  ###7', '##|   ##|', 'L######rJ', ' L=====J '),
+        @(' ######7 ', '##r===##7', '##|   ##|', '##|   ##|', 'L######rJ', ' L=====J '),
+        @('##7  ##7', '##| ##rJ', '#####rJ ', '##r=##7 ', '##|  ##7', 'L=J  L=J'),
+        @('##7  ##7', '##|  ##|', '#######|', '##r==##|', '##|  ##|', 'L=J  L=J'),
+        @(' #####7 ', '##r==##7', '#######|', '##r==##|', '##|  ##|', 'L=J  L=J'),
+        @('###7   ##7', '####7  ##|', '##r##7 ##|', '##|L##7##|', '##| L####|', 'L=J  L===J')
+    )
+    $map = @{ '#' = 0x2588; '=' = 0x2550; '|' = 0x2551; 'r' = 0x2554; '7' = 0x2557; 'L' = 0x255A; 'J' = 0x255D }
+    foreach ($r in 0..5) {
+        $row = -join ($letters | ForEach-Object { $_[$r] })
+        -join ($row.ToCharArray() | ForEach-Object { if ($map.ContainsKey([string]$_)) { [char]$map[[string]$_] } else { $_ } })
     }
 }
+$BannerWidth = $BannerRows[0].Length
+$BannerIconColumn = 11
+
+function Get-SystemSummary {
+    $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
+    $name = "$($cv.ProductName)"
+    # ProductName Windows 11'de de "Windows 10" der
+    if ([int]$cv.CurrentBuildNumber -ge 22000) { $name = $name -replace 'Windows 10', 'Windows 11' }
+    $os = (@($name, $cv.DisplayVersion) | Where-Object { $_ }) -join ' '
+    "$os  ·  $env:USERNAME@$env:COMPUTERNAME"
+}
+
+function Split-Text([string]$Text, [int]$Width) {
+    $line = ''
+    foreach ($word in $Text -split ' ') {
+        if ($line -and ($line.Length + $word.Length + 1) -gt $Width) { $line; $line = $word }
+        else { $line = if ($line) { "$line $word" } else { $word } }
+    }
+    if ($line) { $line }
+}
+
+# Ayrıntı panelinin satırları: (renk, metin) çiftleri
+function Get-DetailRows($Item, [int]$Width) {
+    foreach ($text in $Item.Lines) {
+        $first = $true
+        foreach ($part in Split-Text $text ($Width - 2)) {
+            $bullet = if ($first) { "$($Glyph.Bullet) " } else { '  ' }
+            , @($Ui.Text, "$bullet$part")
+            $first = $false
+        }
+    }
+    if ($Item.Note) {
+        , @($Ui.Text, '')
+        foreach ($part in Split-Text $Item.Note $Width) { , @($Ui[$Item.NoteKind], $part) }
+    }
+}
+
+# VT dizileri: Windows Terminal ve PowerShell 7'de zaten açık, 5.1 conhost'ta açılır
+function Enable-VirtualTerminal {
+    if ($env:WT_SESSION -or $PSVersionTable.PSVersion.Major -ge 7) { return $true }
+    try {
+        if (-not ('Winsetup.ConsoleMode' -as [type])) {
+            Add-Type -Namespace Winsetup -Name ConsoleMode -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int nStdHandle);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+'@
+        }
+        $handle = [Winsetup.ConsoleMode]::GetStdHandle(-11)
+        [uint32]$mode = 0
+        if (-not [Winsetup.ConsoleMode]::GetConsoleMode($handle, [ref]$mode)) { return $false }
+        # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        [Winsetup.ConsoleMode]::SetConsoleMode($handle, $mode -bor 4)
+    } catch {
+        $false
+    }
+}
+
+function Test-FancyConsole {
+    try {
+        $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected -and
+            [Console]::WindowWidth -ge 60 -and (Enable-VirtualTerminal)
+    } catch {
+        $false
+    }
+}
+
+function Get-MenuLayout($Items) {
+    $w = [Console]::WindowWidth
+    $h = [Console]::WindowHeight
+    $leftW = 28
+    $rightW = [Math]::Min(60, $w - $leftW - 6)
+    if ($rightW -lt 34) { $rightW = 0 }
+    $inner = $Items.Count
+    if ($rightW) {
+        foreach ($item in $Items) { $inner = [Math]::Max($inner, @(Get-DetailRows $item ($rightW - 4)).Count) }
+    }
+    $panelH = $inner + 2
+    # banner (simge + 6 satır), boşluk, bilgi, boşluk, paneller, boşluk, kısayollar
+    $contentH = 7 + 1 + 1 + 1 + $panelH + 1 + 1
+    if ($w -lt $BannerWidth + 4 -or $h -lt $contentH + 1) { return $null }
+    $totalW = if ($rightW) { $leftW + 2 + $rightW } else { $leftW }
+    $top = [Math]::Max(1, [int][Math]::Floor(($h - $contentH) / 2) + 1)
+    [pscustomobject]@{
+        Width = $w; BannerTop = $top; BannerLeft = [int][Math]::Floor(($w - $BannerWidth) / 2) + 1
+        InfoRow = $top + 8; PanelTop = $top + 10; PanelLeft = [int][Math]::Floor(($w - $totalW) / 2) + 1
+        LeftW = $leftW; RightW = $rightW; Inner = $inner; FooterRow = $top + 10 + $panelH + 1
+    }
+}
+
+function Get-Centered([string]$Plain, [string]$Colored, [int]$Row, [int]$Width) {
+    "$Esc[$Row;$([Math]::Max(1, [int][Math]::Floor(($Width - $Plain.Length) / 2) + 1))H$Colored"
+}
+
+# Başlıklı kutu üst kenarı: ╭─ Başlık ───╮
+function Get-BoxTop([int]$X, [int]$Y, [int]$Width, [string]$Title, [string]$TitleColor) {
+    $line = [string]$Glyph.H * ($Width - 5 - $Title.Length)
+    "$Esc[$Y;$($X)H$($Ui.Border)$($Glyph.TL)$($Glyph.H) $($Ui.Bold)$TitleColor$Title$($Ui.Reset)$($Ui.Border) $line$($Glyph.TR)"
+}
+
+function Write-Banner($Layout, [double]$Phase, [int]$Reveal) {
+    $sb = New-Object Text.StringBuilder
+    $colors = for ($c = 0; $c -lt $BannerWidth; $c++) {
+        $Gradient[(([int]($c * 1.4 - $Phase) % $GradientSteps) + $GradientSteps) % $GradientSteps]
+    }
+    if ($Reveal -gt $BannerIconColumn) {
+        [void]$sb.Append("$Esc[$($Layout.BannerTop);$($Layout.BannerLeft + $BannerIconColumn)H").Append($colors[$BannerIconColumn]).Append('>_')
+    }
+    for ($r = 0; $r -lt $BannerRows.Count; $r++) {
+        [void]$sb.Append("$Esc[$($Layout.BannerTop + 1 + $r);$($Layout.BannerLeft)H")
+        $row = $BannerRows[$r]
+        for ($c = 0; $c -lt $BannerWidth; $c++) {
+            $ch = $row[$c]
+            if ($c -ge $Reveal -or $ch -eq ' ') { [void]$sb.Append(' ') }
+            elseif ($ch -eq [char]0x2588) { [void]$sb.Append($colors[$c]).Append($ch) }
+            else { [void]$sb.Append($Ui.Border).Append($ch) }
+        }
+    }
+    [void]$sb.Append($Ui.Reset)
+    [Console]::Write($sb.ToString())
+}
+
+function Write-MenuBody($Layout, [string]$Title, $Items, [int]$Index, [string]$Info) {
+    $sb = New-Object Text.StringBuilder
+    $x = $Layout.PanelLeft; $y = $Layout.PanelTop; $w = $Layout.LeftW
+
+    $sep = "  $($Glyph.Dot)  "
+    [void]$sb.Append((Get-Centered "WinSetup$sep$Info" "$($Ui.Bold)$($Ui.Accent)WinSetup$($Ui.Reset)$($Ui.Dim)$sep$($Ui.Sub)$Info" $Layout.InfoRow $Layout.Width))
+
+    $v = "$($Ui.Border)$($Glyph.V)"
+    $h = [string]$Glyph.H
+
+    # Sol panel: liste
+    [void]$sb.Append((Get-BoxTop $x $y $w $Title $Ui.Accent))
+    for ($i = 0; $i -lt $Layout.Inner; $i++) {
+        [void]$sb.Append("$Esc[$($y + 1 + $i);$($x)H$v")
+        if ($i -lt $Items.Count) {
+            $item = $Items[$i]
+            $text = " $($item.Hotkey)  $($item.Label)".PadRight($w - 4)
+            if ($i -eq $Index) {
+                [void]$sb.Append("$($Ui.SelBg)$($Ui.Accent) $($Glyph.Pointer)$($Ui.Bold)$($Ui.Text)$text$($Ui.Reset)")
+            } elseif (-not $item.Key) {
+                [void]$sb.Append("  $($Ui.Dim)$text")
+            } else {
+                [void]$sb.Append("  $($Ui.Sub)$text")
+            }
+        } else {
+            [void]$sb.Append(' ' * ($w - 2))
+        }
+        [void]$sb.Append($v)
+    }
+    [void]$sb.Append("$Esc[$($y + 1 + $Layout.Inner);$($x)H$($Ui.Border)$($Glyph.BL)$($h * ($w - 2))$($Glyph.BR)")
+
+    # Sağ panel: seçili öğenin ayrıntıları
+    if ($Layout.RightW) {
+        $rx = $x + $w + 2; $rw = $Layout.RightW
+        $item = $Items[$Index]
+        [void]$sb.Append((Get-BoxTop $rx $y $rw $item.Label $Ui.Text))
+        $rows = @(Get-DetailRows $item ($rw - 4))
+        for ($i = 0; $i -lt $Layout.Inner; $i++) {
+            $color, $text = if ($i -lt $rows.Count) { $rows[$i] } else { $Ui.Text, '' }
+            [void]$sb.Append("$Esc[$($y + 1 + $i);$($rx)H$v $color$($text.PadRight($rw - 4)) $v")
+        }
+        [void]$sb.Append("$Esc[$($y + 1 + $Layout.Inner);$($rx)H$($Ui.Border)$($Glyph.BL)$($h * ($rw - 2))$($Glyph.BR)")
+    }
+
+    $keys = @($Items | Where-Object Key | ForEach-Object Hotkey)
+    $range = if ($keys.Count -gt 1) { "$($keys[0])-$($keys[-1])" } else { "$($keys[0])" }
+    $hints = @(@("$($Glyph.Up)$($Glyph.Down)", 'gezin'), @('enter', 'seç'), @($range, 'kısayol'), @('esc', 'çık'))
+    $plain = ($hints | ForEach-Object { "$($_[0]) $($_[1])" }) -join '   '
+    $colored = ($hints | ForEach-Object { "$($Ui.Text)$($_[0])$($Ui.Dim) $($_[1])" }) -join '   '
+    [void]$sb.Append((Get-Centered $plain $colored $Layout.FooterRow $Layout.Width))
+    [void]$sb.Append($Ui.Reset)
+    [Console]::Write($sb.ToString())
+}
+
+# Alternatif ekranda animasyonlu menü; seçilen öğenin Key'ini döner (çıkışta $null).
+function Read-FancyMenu([string]$Title, $Items) {
+    $index = 0
+    $info = Get-SystemSummary
+    $savedEncoding = [Console]::OutputEncoding
+    $savedCtrlC = [Console]::TreatControlCAsInput
+    [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false
+    [Console]::TreatControlCAsInput = $true
+    [Console]::Write("$Esc[?1049h$Esc[?25l$Esc[2J")
+    try {
+        $size = ''; $layout = $null; $dirty = $true
+        $phase = 0.0; $reveal = 0
+        while ($true) {
+            $now = "$([Console]::WindowWidth)x$([Console]::WindowHeight)"
+            if ($now -ne $size) {
+                $size = $now
+                $layout = Get-MenuLayout $Items
+                [Console]::Write("$Esc[0m$Esc[2J")
+                if (-not $layout) {
+                    $msg = 'Pencere çok küçük, büyüt ya da esc ile çık'
+                    [Console]::Write((Get-Centered $msg "$($Ui.Warn)$msg$($Ui.Reset)" ([int]([Console]::WindowHeight / 2)) ([Console]::WindowWidth)))
+                }
+                $dirty = $true
+            }
+            if ($layout) {
+                if ($dirty) { Write-MenuBody $layout $Title $Items $index $info; $dirty = $false }
+                Write-Banner $layout $phase $reveal
+            }
+            if ($reveal -le $BannerWidth) { $reveal += 3 }
+            $phase = ($phase + 1.6) % $GradientSteps
+
+            $deadline = [DateTime]::Now.AddMilliseconds(40)
+            while (-not [Console]::KeyAvailable -and [DateTime]::Now -lt $deadline) { Start-Sleep -Milliseconds 10 }
+            while ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                $char = [string]$key.KeyChar
+                if ($key.Key -eq 'UpArrow' -or $char -eq 'k') { $index = ($index - 1 + $Items.Count) % $Items.Count; $dirty = $true }
+                elseif ($key.Key -eq 'DownArrow' -or $key.Key -eq 'Tab' -or $char -eq 'j') { $index = ($index + 1) % $Items.Count; $dirty = $true }
+                elseif ($key.Key -eq 'Home') { $index = 0; $dirty = $true }
+                elseif ($key.Key -eq 'End') { $index = $Items.Count - 1; $dirty = $true }
+                elseif ($key.Key -eq 'Enter') { return $Items[$index].Key }
+                elseif ($key.Key -eq 'Escape' -or $char -eq 'q' -or [int]$key.KeyChar -eq 3) { return $null }
+                else {
+                    $hit = @($Items | Where-Object Hotkey -eq $char)
+                    if ($hit.Count) { return $hit[0].Key }
+                }
+            }
+        }
+    } finally {
+        [Console]::Write("$Esc[0m$Esc[?25h$Esc[?1049l")
+        [Console]::TreatControlCAsInput = $savedCtrlC
+        [Console]::OutputEncoding = $savedEncoding
+    }
+}
+
+function Read-PlainMenu([string]$Title, $Items) {
+    Write-Host ''
+    Write-Host "  Winsetup $($Glyph.Dash) $Title" -ForegroundColor Cyan
+    $pad = ($Items | ForEach-Object { $_.Label.Length } | Measure-Object -Maximum).Maximum + 1
+    foreach ($item in $Items) { Write-Host ("  {0}) {1} {2}" -f $item.Hotkey, $item.Label.PadRight($pad), $item.Hint) }
+    while ($true) {
+        $answer = Read-Host '  Seçim'
+        $hit = @($Items | Where-Object Hotkey -eq $answer)
+        if ($hit.Count) { return $hit[0].Key }
+    }
+}
+
+function Read-MenuChoice([string]$Title, $Items) {
+    if ((Test-FancyConsole) -and (Get-MenuLayout $Items)) { Read-FancyMenu $Title $Items } else { Read-PlainMenu $Title $Items }
+}
+
+function Read-ProfileChoice { Read-MenuChoice 'Profil' $ProfileMenu }
+
+function Read-LevelChoice { Read-MenuChoice 'Debloat seviyesi' $LevelMenu }
 
 function Read-YesNo([string]$Question) {
     (Read-Host "  $Question (E/H)") -match '^(e|evet|y|yes)$'
@@ -1221,6 +1571,7 @@ function Invoke-Winsetup {
     }
     if ($selected -eq 'Debloat' -and -not $debloatLevel) {
         $debloatLevel = if ($interactive) { Read-LevelChoice } else { 'Standard' }
+        if (-not $debloatLevel) { return }
     }
 
     # Uygulama kaldıran profiller Windows PowerShell 5.1 ister: PS7'de Get-AppxProvisionedPackage
