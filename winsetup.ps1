@@ -1286,7 +1286,12 @@ $BannerRows = & {
     }
 }
 $BannerWidth = $BannerRows[0].Length
-$BannerIconColumn = 11
+# Ö'nün üstündeki >_ simgesi, yarım bloklarla: T = ▀, B = ▄, # = █
+$BannerIconColumn = 9
+$BannerIconRows = foreach ($row in 'T#B', ' B#T', 'TT TTTT') {
+    -join ($row.ToCharArray() | ForEach-Object { switch ($_) { 'T' { [char]0x2580 } 'B' { [char]0x2584 } '#' { [char]0x2588 } default { ' ' } } })
+}
+$BannerIconHeight = $BannerIconRows.Count
 
 function Get-SystemSummary {
     $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
@@ -1363,15 +1368,17 @@ function Get-MenuLayout($Items) {
         foreach ($item in $Items) { $inner = [Math]::Max($inner, @(Get-DetailRows $item ($rightW - 4)).Count) }
     }
     $panelH = $inner + 2
-    # banner (simge + 6 satır), boşluk, bilgi, boşluk, paneller, boşluk, kısayollar
-    $contentH = 7 + 1 + 1 + 1 + $panelH + 1 + 1
+    # simge + banner, boşluk, bilgi, boşluk, paneller, boşluk, kısayollar
+    $bannerH = $BannerIconHeight + $BannerRows.Count
+    $contentH = $bannerH + 1 + 1 + 1 + $panelH + 1 + 1
     if ($w -lt $BannerWidth + 4 -or $h -lt $contentH + 1) { return $null }
     $totalW = if ($rightW) { $leftW + 2 + $rightW } else { $leftW }
     $top = [Math]::Max(1, [int][Math]::Floor(($h - $contentH) / 2) + 1)
+    $panelTop = $top + $bannerH + 3
     [pscustomobject]@{
         Width = $w; BannerTop = $top; BannerLeft = [int][Math]::Floor(($w - $BannerWidth) / 2) + 1
-        InfoRow = $top + 8; PanelTop = $top + 10; PanelLeft = [int][Math]::Floor(($w - $totalW) / 2) + 1
-        LeftW = $leftW; RightW = $rightW; Inner = $inner; FooterRow = $top + 10 + $panelH + 1
+        InfoRow = $top + $bannerH + 1; PanelTop = $panelTop; PanelLeft = [int][Math]::Floor(($w - $totalW) / 2) + 1
+        LeftW = $leftW; RightW = $rightW; Inner = $inner; FooterRow = $panelTop + $panelH + 1
     }
 }
 
@@ -1390,11 +1397,16 @@ function Write-Banner($Layout, [double]$Phase, [int]$Reveal) {
     $colors = for ($c = 0; $c -lt $BannerWidth; $c++) {
         $Gradient[(([int]($c * 1.4 - $Phase) % $GradientSteps) + $GradientSteps) % $GradientSteps]
     }
-    if ($Reveal -gt $BannerIconColumn) {
-        [void]$sb.Append("$Esc[$($Layout.BannerTop);$($Layout.BannerLeft + $BannerIconColumn)H").Append($colors[$BannerIconColumn]).Append('>_')
+    for ($r = 0; $r -lt $BannerIconHeight; $r++) {
+        $row = $BannerIconRows[$r]
+        [void]$sb.Append("$Esc[$($Layout.BannerTop + $r);$($Layout.BannerLeft + $BannerIconColumn)H")
+        for ($c = 0; $c -lt $row.Length; $c++) {
+            $col = $BannerIconColumn + $c
+            if ($row[$c] -eq ' ' -or $col -ge $Reveal) { [void]$sb.Append(' ') } else { [void]$sb.Append($colors[$col]).Append($row[$c]) }
+        }
     }
     for ($r = 0; $r -lt $BannerRows.Count; $r++) {
-        [void]$sb.Append("$Esc[$($Layout.BannerTop + 1 + $r);$($Layout.BannerLeft)H")
+        [void]$sb.Append("$Esc[$($Layout.BannerTop + $BannerIconHeight + $r);$($Layout.BannerLeft)H")
         $row = $BannerRows[$r]
         for ($c = 0; $c -lt $BannerWidth; $c++) {
             $ch = $row[$c]
