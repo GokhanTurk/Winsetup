@@ -462,23 +462,85 @@ function Remove-Edge {
 
 #region Windows ayarları
 
+# Kullanıcıya ait gizlilik ayarları; mevcut kullanıcıya ve Default hive üzerinden yeni hesaplara uygulanır.
+function Set-UserPrivacy([string]$Root) {
+    Set-ContentDeliveryOff $Root
+    $cv = "$Root\Software\Microsoft\Windows\CurrentVersion"
+    $adv = "$cv\Explorer\Advanced"
+
+    # Gizlilik > Öneriler ve teklifler
+    Set-Reg "$cv\AdvertisingInfo" 'Enabled' 0
+    Set-Reg "$cv\Privacy" 'TailoredExperiencesWithDiagnosticDataEnabled' 0
+    Set-Reg "$Root\Software\Policies\Microsoft\Windows\CloudContent" 'DisableTailoredExperiencesWithDiagnosticData' 1
+    Set-Reg "$Root\Control Panel\International\User Profile" 'HttpAcceptLanguageOptOut' 1
+    # "Improve Start and search results": açılan uygulamaların takibi
+    Set-Reg $adv 'Start_TrackProgs' 0
+
+    # Gizlilik > Mürekkep ve yazma kişiselleştirme, konuşma, geri bildirim
+    Set-Reg "$Root\Software\Microsoft\InputPersonalization" 'RestrictImplicitInkCollection' 1
+    Set-Reg "$Root\Software\Microsoft\InputPersonalization" 'RestrictImplicitTextCollection' 1
+    Set-Reg "$Root\Software\Microsoft\InputPersonalization\TrainedDataStore" 'HarvestContacts' 0
+    Set-Reg "$Root\Software\Microsoft\Personalization\Settings" 'AcceptedPrivacyPolicy' 0
+    Set-Reg "$Root\Software\Microsoft\Input\TIPC" 'Enabled' 0
+    Set-Reg "$Root\Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy" 'HasAccepted' 0
+    Set-Reg "$Root\Software\Microsoft\Siuf\Rules" 'NumberOfSIUFInPeriod' 0
+
+    # Arama: Bing, bulut içerik araması, arama geçmişi, arama vurguları
+    Set-Reg "$cv\Search" 'BingSearchEnabled' 0
+    Set-Reg "$cv\Search" 'CortanaConsent' 0
+    Set-Reg "$Root\Software\Policies\Microsoft\Windows\Explorer" 'DisableSearchBoxSuggestions' 1
+    Set-Reg "$cv\SearchSettings" 'IsMSACloudSearchEnabled' 0
+    Set-Reg "$cv\SearchSettings" 'IsAADCloudSearchEnabled' 0
+    Set-Reg "$cv\SearchSettings" 'IsDeviceSearchHistoryEnabled' 0
+    Set-Reg "$cv\SearchSettings" 'IsDynamicSearchBoxEnabled' 0
+
+    # Başlat önerileri, hesap bildirimleri, "cihazı kurmayı bitir" ekranı, Gezgin'deki OneDrive/M365 tanıtımları
+    Set-Reg $adv 'Start_IrisRecommendations' 0
+    Set-Reg $adv 'Start_AccountNotifications' 0
+    Set-Reg $adv 'ShowSyncProviderNotifications' 0
+    Set-Reg "$cv\UserProfileEngagement" 'ScoobeSystemSettingEnabled' 0
+}
+
+$TelemetryTasks = @(
+    '\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser'
+    '\Microsoft\Windows\Application Experience\ProgramDataUpdater'
+    '\Microsoft\Windows\Customer Experience Improvement Program\Consolidator'
+    '\Microsoft\Windows\Customer Experience Improvement Program\UsbCeip'
+    '\Microsoft\Windows\Feedback\Siuf\DmClient'
+    '\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload'
+)
+
 function Set-PrivacyTweaks {
-    Set-ContentDeliveryOff 'HKCU:'
-    Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' 'AllowTelemetry' 0
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo' 'Enabled' 0
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy' 'TailoredExperiencesWithDiagnosticDataEnabled' 0
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' 'BingSearchEnabled' 0
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' 'CortanaConsent' 0
-    Set-Reg 'HKCU:\Software\Policies\Microsoft\Windows\Explorer' 'DisableSearchBoxSuggestions' 1
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'Start_IrisRecommendations' 0
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'Start_AccountNotifications' 0
-    # "Suggest ways to get the most out of Windows and finish setting up this device"
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement' 'ScoobeSystemSettingEnabled' 0
-    # Dosya Gezgini'nde OneDrive/Microsoft 365 tanıtımları
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'ShowSyncProviderNotifications' 0
-    # Arama vurguları (trendler, günün olayları)
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\SearchSettings' 'IsDynamicSearchBoxEnabled' 0
-    Write-Ok 'Reklam, öneri, ipucu ve telemetri kapatıldı'
+    Set-UserPrivacy 'HKCU:'
+    Invoke-DefaultUserHive { param($root) Set-UserPrivacy $root }
+
+    # Tanılama verisi, geri bildirim, reklam kimliği, etkinlik geçmişi
+    $policies = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows'
+    Set-Reg "$policies\DataCollection" 'AllowTelemetry' 0
+    Set-Reg "$policies\DataCollection" 'DoNotShowFeedbackNotifications' 1
+    Set-Reg "$policies\AdvertisingInfo" 'DisabledByGroupPolicy' 1
+    Set-Reg "$policies\System" 'EnableActivityFeed' 0
+    Set-Reg "$policies\System" 'PublishUserActivities' 0
+    Set-Reg "$policies\System" 'UploadUserActivities' 0
+    Set-Reg "$policies\Windows Search" 'AllowCloudSearch' 0
+    # Uygulama uyumluluk telemetrisi, müşteri deneyimi programı, hata raporlama
+    Set-Reg "$policies\AppCompat" 'AITEnable' 0
+    Set-Reg "$policies\AppCompat" 'DisableUAR' 1
+    Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows' 'CEIPEnable' 0
+    Set-Reg 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' 'Disabled' 1
+    # Recall ekran görüntüleri
+    Set-Reg "$policies\WindowsAI" 'DisableAIDataAnalysis' 1
+    # Güncellemeler internetteki başka bilgisayarlara yüklenmez (sadece HTTP)
+    Set-Reg "$policies\DeliveryOptimization" 'DODownloadMode' 0
+
+    # Telemetri servisi (Connected User Experiences and Telemetry) ve zamanlanmış görevler
+    Stop-Service DiagTrack -Force -ErrorAction SilentlyContinue
+    Set-Service DiagTrack -StartupType Disabled -ErrorAction SilentlyContinue
+    foreach ($task in $TelemetryTasks) {
+        $name = Split-Path $task -Leaf
+        Disable-ScheduledTask -TaskPath ((Split-Path $task -Parent) + '\') -TaskName $name -ErrorAction SilentlyContinue | Out-Null
+    }
+    Write-Ok 'Reklam, öneri, ipucu ve telemetri kapatıldı (mevcut ve yeni hesaplar)'
 }
 
 # Ayarlar > Bildirimler ana anahtarı; kullanıcı istediğinde tekrar açabilir.
@@ -542,6 +604,14 @@ function Set-FileExtensionsVisible {
     Write-Ok 'Dosya uzantıları görünür'
 }
 
+# Num Lock açılışta açık: giriş ekranı, mevcut kullanıcı ve yeni hesaplar.
+# Giriş ekranında 2 yerine 2147483650 (0x80000002) kullanılır; Windows 11 2'yi güncellemelerle sıfırlayabiliyor.
+function Enable-NumLock {
+    Set-Reg 'Registry::HKEY_USERS\.DEFAULT\Control Panel\Keyboard' 'InitialKeyboardIndicators' '2147483650' 'String'
+    Set-Reg 'HKCU:\Control Panel\Keyboard' 'InitialKeyboardIndicators' '2' 'String'
+    Invoke-DefaultUserHive { param($root) Set-Reg "$root\Control Panel\Keyboard" 'InitialKeyboardIndicators' '2' 'String' }
+}
+
 # Eski OneClickToReady'den gelen kişisel ayarlar
 function Set-PersonalTweaks {
     $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
@@ -549,9 +619,7 @@ function Set-PersonalTweaks {
     Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'SystemUsesLightTheme' 0
     Set-Reg $adv 'HideFileExt' 0
     Set-Reg $adv 'LaunchTo' 1
-    # Num Lock açılışta açık (giriş ekranı + kullanıcı)
-    Set-Reg 'Registry::HKEY_USERS\.DEFAULT\Control Panel\Keyboard' 'InitialKeyboardIndicators' '2' 'String'
-    Set-Reg 'HKCU:\Control Panel\Keyboard' 'InitialKeyboardIndicators' '2' 'String'
+    Enable-NumLock
     # Yapışkan / Geçiş / Filtre tuşları kısayolları kapalı
     Set-Reg 'HKCU:\Control Panel\Accessibility\StickyKeys' 'Flags' '506' 'String'
     Set-Reg 'HKCU:\Control Panel\Accessibility\ToggleKeys' 'Flags' '58' 'String'
@@ -637,6 +705,18 @@ function Set-FlatStartMenu {
     Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Start' 'AllAppsViewMode' 2
     Stop-Process -Name StartMenuExperienceHost -Force -ErrorAction SilentlyContinue
     Write-Ok 'Başlat menüsü klasörsüz ve liste görünümünde'
+}
+
+# Başlat menüsündeki Önerilenler bölümü gizlenir; sabitlenmiş öğelere dokunulmaz.
+# İlke Pro sürümde yalnızca eğitim ortamı işaretiyle uygulanıyor.
+function Disable-StartRecommended {
+    Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer' 'HideRecommendedSection' 1
+    Set-Reg 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Start' 'HideRecommendedSection' 1
+    Set-Reg 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Education' 'IsEducationEnvironment' 1
+    # En çok kullanılan uygulamalar listesi
+    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'Start_TrackProgs' 0
+    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Start' 'ShowFrequentList' 0
+    Write-Ok 'Başlat menüsünde Önerilenler bölümü kapatıldı'
 }
 
 function Disable-FastBoot {
@@ -1083,10 +1163,11 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment } @(Get-ToolStepDetails $TerminalTools)
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
+            New-Step 'Başlat menüsü: Önerilenler bölümü kapalı (sabitlenenlere dokunulmaz)' { Disable-StartRecommended }
             New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents } @($OptionalComponentsDetails)
         }
         'Work' {
-            New-DebloatStep 'Debloat (Standart + Widgets): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' 'Standard' @('MicrosoftWindows.Client.WebExperience')
+            New-DebloatStep 'Debloat (Standart + Widgets, Telefon Bağlantısı): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' 'Standard' @('MicrosoftWindows.Client.WebExperience', 'Microsoft.YourPhone')
             New-Step 'OneDrive kaldır' { Remove-OneDrive } @(Get-OneDriveStepDetails)
             New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Gezgin Bu Bilgisayar''da açılır, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
@@ -1098,6 +1179,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment } @(Get-ToolStepDetails $TerminalTools)
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
+            New-Step 'Başlat menüsü: Önerilenler bölümü kapalı (sabitlenenlere dokunulmaz)' { Disable-StartRecommended }
         }
         'VM' {
             New-DebloatStep 'Debloat (Full): Edge dahil kalanlar korunur' 'Full'
@@ -1111,6 +1193,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-Step 'Duvar kağıdı' { Set-Wallpaper }
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment } @(Get-ToolStepDetails $TerminalTools)
             New-Step 'Başlat menüsü: program klasörleri düzleştirilir (Windows klasörleri kalır), liste görünümü' { Set-FlatStartMenu }
+            New-Step 'Başlat menüsü: Önerilenler bölümü kapalı (sabitlenenlere dokunulmaz)' { Disable-StartRecommended }
             New-Step 'Gereksiz Windows bileşenleri (WordPad, IE, Steps Recorder, Recall, PowerShell 2.0...) — uzun sürebilir' { Remove-OptionalComponents } @($OptionalComponentsDetails)
         }
         'Standard' {
@@ -1182,7 +1265,7 @@ $ProfileMenu = @(
     ) $SystemNote 'Warn'
     New-MenuItem 'Work' '2' 'İş' 'Standart debloat (Edge/Teams/Outlook kalır) + OneDrive kaldır + kişisel ortam' @(
         'Standart debloat: Edge, Teams ve Outlook kalır'
-        'OneDrive kaldırılır'
+        'OneDrive ve Telefon Bağlantısı kaldırılır'
         '7-Zip, Firefox'
         $DevEnvironment
     ) $SystemNote 'Warn'

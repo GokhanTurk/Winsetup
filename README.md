@@ -34,7 +34,7 @@ irm gokhanturk.com/uninstall | iex
 | Profil | İçerik |
 | --- | --- |
 | `Gaming` | Full debloat, Edge ve OneDrive kaldırma, oyun optimizasyonları, Steam, Firefox, mpv, geliştirici ortamı |
-| `Work` | Standart debloat, OneDrive kaldırma, 7-Zip, Firefox, geliştirici ortamı |
+| `Work` | Standart debloat, OneDrive ve Telefon Bağlantısı kaldırma, 7-Zip, Firefox, geliştirici ortamı |
 | `VM` | Full debloat, OneDrive kaldırma, geliştirici ortamı |
 | `Standard` | Standart debloat, reklam ve telemetri kapatma, 7-Zip |
 | `Debloat` | Yalnızca uygulama kaldırma |
