@@ -9,7 +9,7 @@
 & {
 
 param(
-    [ValidateSet('Gaming', 'Work', 'VM', 'Standard', 'Debloat', 'Neovim', 'Terminal')]
+    [ValidateSet('Gaming', 'Work', 'VM', 'Standard', 'Debloat', 'Neovim', 'Terminal', 'RSAT')]
     [string]$Profile,
     [ValidateSet('Standard', 'Full')]
     [string]$Level,
@@ -537,7 +537,6 @@ function Set-PersonalTweaks {
     Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'SystemUsesLightTheme' 0
     Set-Reg $adv 'HideFileExt' 0
     Set-Reg $adv 'LaunchTo' 1
-    Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel' '{20D04FE0-3AEA-1069-A2D8-08002B30309D}' 0
     # Num Lock açılışta açık (giriş ekranı + kullanıcı)
     Set-Reg 'Registry::HKEY_USERS\.DEFAULT\Control Panel\Keyboard' 'InitialKeyboardIndicators' '2' 'String'
     Set-Reg 'HKCU:\Control Panel\Keyboard' 'InitialKeyboardIndicators' '2' 'String'
@@ -953,6 +952,63 @@ function Install-PersonalEnvironment {
 
 #endregion
 
+#region RSAT
+
+# Active Directory paketi Users and Computers ve Sites and Services'i (ayrıca Domains and Trusts, ADSI Edit
+# ve ActiveDirectory modülünü) içerir.
+$RsatCapabilities = [ordered]@{
+    'Rsat.ActiveDirectory.DS-LDS.Tools' = 'AD Users and Computers, AD Sites and Services'
+    'Rsat.Dns.Tools'                    = 'DNS'
+    'Rsat.DHCP.Tools'                   = 'DHCP'
+}
+
+function Get-RsatCapabilities {
+    foreach ($name in $RsatCapabilities.Keys) {
+        Get-WindowsCapability -Online -Name "$name~*" -ErrorAction Stop | Select-Object -First 1
+    }
+}
+
+function Get-RsatLabel([string]$CapabilityName) { $RsatCapabilities[$CapabilityName -replace '~.*$', ''] }
+
+function Get-RsatStepDetails {
+    try {
+        $caps = @(Get-RsatCapabilities)
+    } catch {
+        return 'Kurulum durumu kontrol edilemedi (yönetici gerekir)'
+    }
+    $missing = @($caps | Where-Object State -ne 'Installed' | ForEach-Object { Get-RsatLabel $_.Name })
+    $installed = @($caps | Where-Object State -eq 'Installed' | ForEach-Object { Get-RsatLabel $_.Name })
+    if ($missing.Count) { 'Kurulacak: ' + ($missing -join ', ') }
+    if ($installed.Count) { 'Zaten kurulu: ' + ($installed -join ', ') }
+    if (-not $caps.Count) { 'Bu Windows sürümünde RSAT yok (Pro/Enterprise/Education gerekir)' }
+}
+
+function Install-Rsat {
+    $caps = @(Get-RsatCapabilities)
+    if (-not $caps.Count) {
+        Write-Warn 'Bu Windows sürümünde RSAT yok (Pro/Enterprise/Education gerekir)'
+        return
+    }
+    $missing = @($caps | Where-Object State -ne 'Installed')
+    if (-not $missing.Count) {
+        Write-Info 'RSAT araçları zaten kurulu'
+        return
+    }
+
+    foreach ($cap in $missing) {
+        $label = Get-RsatLabel $cap.Name
+        Write-Info "Kuruluyor: $label (birkaç dakika sürebilir)"
+        try {
+            Add-WindowsCapability -Online -Name $cap.Name -ErrorAction Stop | Out-Null
+            Write-Ok "Kuruldu: $label"
+        } catch {
+            Write-Warn "Kurulamadı: $label ($($_.Exception.Message))"
+        }
+    }
+}
+
+#endregion
+
 #region Profiller
 
 # Details onaydan önce adımın altında gösterilir; Data adımın Action'ına parametre olarak verilir.
@@ -999,7 +1055,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
             New-DebloatStep 'Debloat (Full): hesap makinesi, notepad, terminal, ekran alıntısı, Store, fotoğraflar, paint ve codec''ler hariç her şey' 'Full'
             New-Step 'Edge kaldır (WebView2 kalır)' { Remove-Edge } @(Get-EdgeStepDetails)
             New-Step 'OneDrive kaldır' { Remove-OneDrive } @(Get-OneDriveStepDetails)
-            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Gezgin Bu Bilgisayar''da açılır, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
@@ -1019,7 +1075,8 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
         }
         'Work' {
             New-DebloatStep 'Debloat (Standart + Widgets): Edge, Teams, Outlook, Uzak Masaüstü, Hızlı Yardım kalır' 'Standard' @('MicrosoftWindows.Client.WebExperience')
-            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'OneDrive kaldır' { Remove-OneDrive } @(Get-OneDriveStepDetails)
+            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Gezgin Bu Bilgisayar''da açılır, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
@@ -1033,7 +1090,7 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
         'VM' {
             New-DebloatStep 'Debloat (Full): Edge dahil kalanlar korunur' 'Full'
             New-Step 'OneDrive kaldır' { Remove-OneDrive } @(Get-OneDriveStepDetails)
-            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Bu Bilgisayar, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
+            New-Step 'Kişisel ayarlar (koyu tema, uzantılar, Gezgin Bu Bilgisayar''da açılır, Num Lock, yapışkan tuşlar, telemetri ve ipuçları, prizde uyku kapalı)' { Set-PersonalTweaks }
             New-Step 'Tüm bildirimler kapalı' { Disable-Notifications }
             New-Step 'Klavye sadece Türkçe Q' { Set-TurkishKeyboard }
             New-Step 'Bölge biçimleri Türkiye' { Set-TurkishRegion }
@@ -1067,11 +1124,16 @@ function Get-Plan([string]$Selected, [string]$DebloatLevel) {
         'Terminal' {
             New-Step 'Kişisel terminal ortamı (PS7, Terminal, FiraCode, zoxide, starship, fzf, eza, bat, rg, fd, fastfetch, git, gh, nvim, dotfiles)' { Install-PersonalEnvironment } @(Get-ToolStepDetails $TerminalTools)
         }
+        'RSAT' {
+            New-Step 'RSAT: AD Users and Computers, AD Sites and Services, DNS, DHCP' { Install-Rsat } @(Get-RsatStepDetails)
+        }
     }
 }
 
 # Bu profiller sistem ayarına dokunmaz: geri yükleme noktası ve Explorer yeniden başlatma gerekmez.
-$LightProfiles = @('Neovim', 'Terminal')
+$LightProfiles = @('Neovim', 'Terminal', 'RSAT')
+# Bunlar PowerShell 7'de çalışır; diğerleri Appx/DISM cmdlet'leri için Windows PowerShell 5.1 ister.
+$Pwsh7Profiles = @('Neovim', 'Terminal')
 $TerminalProfiles = @('Gaming', 'Work', 'VM', 'Terminal')
 
 $ProfileNames = [ordered]@{
@@ -1082,6 +1144,7 @@ $ProfileNames = [ordered]@{
     Debloat  = 'Sadece debloat'
     Neovim   = 'Neovim'
     Terminal = 'Terminal ortamı'
+    RSAT     = 'RSAT yönetim araçları'
 }
 
 function Read-ProfileChoice {
@@ -1094,6 +1157,7 @@ function Read-ProfileChoice {
     Write-Host '  5) Debloat      Sadece uygulama kaldırma'
     Write-Host '  6) Neovim       Neovim + config (kuruluysa sadece config)'
     Write-Host '  7) Terminal     Tüm terminal ve CLI ortamı + configler (kurulu olanlar atlanır)'
+    Write-Host '  8) RSAT         AD Users and Computers, AD Sites and Services, DNS, DHCP'
     Write-Host '  0) Çıkış'
     while ($true) {
         switch (Read-Host '  Seçim') {
@@ -1104,6 +1168,7 @@ function Read-ProfileChoice {
             '5' { return 'Debloat' }
             '6' { return 'Neovim' }
             '7' { return 'Terminal' }
+            '8' { return 'RSAT' }
             '0' { return $null }
         }
     }
@@ -1160,7 +1225,7 @@ function Invoke-Winsetup {
 
     # Uygulama kaldıran profiller Windows PowerShell 5.1 ister: PS7'de Get-AppxProvisionedPackage
     # çalışmıyor, geri yükleme noktası cmdlet'leri yok. Neovim/Terminal her PowerShell'de çalışır.
-    $needsDesktop = $selected -notin $LightProfiles
+    $needsDesktop = $selected -notin $Pwsh7Profiles
     if (-not $DryRun -and (-not (Test-Admin) -or ($needsDesktop -and $PSVersionTable.PSEdition -ne 'Desktop'))) {
         Start-Elevated $selected $debloatLevel $needsDesktop
         return

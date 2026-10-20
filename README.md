@@ -1,10 +1,13 @@
 <div align="center">
 
-# Winsetup
+<img src="assets/banner.svg" alt="GÖKHAN WinSetup" width="720">
 
-Windows 11 tek tıkla kurulum
+<br>
 
-<img src="assets/demo.svg" alt="Winsetup demo" width="760">
+![Windows 11](https://img.shields.io/badge/Windows_11-1e1e2e?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iIzg5YjRmYSIgZD0iTTIgMmg5LjV2OS41SDJ6TTEyLjUgMkgyMnY5LjVoLTkuNXpNMiAxMi41aDkuNVYyMkgyek0xMi41IDEyLjVIMjJWMjJoLTkuNXoiLz48L3N2Zz4=) ![PowerShell](https://img.shields.io/badge/PowerShell_5.1_/_7-1e1e2e?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0ibm9uZSIgc3Ryb2tlPSIjY2JhNmY3IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgZD0iTTQgNmw3IDYtNyA2TTEzIDE4aDciLz48L3N2Zz4=)
+
+
+Windows 11 için tek komutla kurulum ve sadeleştirme
 
 </div>
 
@@ -14,19 +17,13 @@ Windows 11 tek tıkla kurulum
 irm gokhanturk.com/win | iex
 ```
 
-Profil seçildikten sonra gerekirse Windows Terminal'de yönetici penceresi açılır. Uygulama kaldıran profiller Windows PowerShell 5.1'de (Appx/DISM cmdlet'leri PowerShell 7'de çalışmıyor), `Neovim` ve `Terminal` PowerShell 7'de çalışır; zaten yönetici PowerShell 7'deysen pencere açılmaz.
-
-Sessiz (soru sormaz):
+Etkileşimsiz:
 
 ```powershell
 & ([scriptblock]::Create((irm gokhanturk.com/win))) -Profile Gaming -Yes
 ```
 
-```powershell
-& ([scriptblock]::Create((irm gokhanturk.com/win))) -Profile Debloat -Level Full -Yes
-```
-
-Sadece debloat:
+Yalnızca debloat:
 
 ```powershell
 irm gokhanturk.com/uninstall | iex
@@ -34,34 +31,35 @@ irm gokhanturk.com/uninstall | iex
 
 ## Profiller
 
-| Profil | |
+| Profil | İçerik |
 | --- | --- |
-| `Gaming` | Full debloat, Edge kaldırılır, oyun ayarları, Steam + Firefox + mpv, kişisel ortam |
-| `Work` | Standart debloat (Edge/Teams/Outlook kalır), 7-Zip + Firefox, kişisel ortam |
-| `VM` | Full debloat, kişisel ortam |
-| `Standard` | Genel kullanıcı: çöp uygulamalar, reklamlar, ipuçları ve telemetri |
-| `Debloat` | Sadece uygulama kaldırma |
-| `Neovim` | Neovim + git + ripgrep + FiraCode Nerd Font ve config; kurulu olanlar atlanır, 0.12'den eski Neovim güncellenir |
-| `Terminal` | Sadece kişisel terminal ve CLI ortamı + configler; kurulu olanlar atlanır |
+| `Gaming` | Full debloat, Edge ve OneDrive kaldırma, oyun optimizasyonları, Steam, Firefox, mpv, geliştirici ortamı |
+| `Work` | Standart debloat, OneDrive kaldırma, 7-Zip, Firefox, geliştirici ortamı |
+| `VM` | Full debloat, OneDrive kaldırma, geliştirici ortamı |
+| `Standard` | Standart debloat, reklam ve telemetri kapatma, 7-Zip |
+| `Debloat` | Yalnızca uygulama kaldırma |
+| `Neovim` | Neovim ve yapılandırması |
+| `Terminal` | Yalnızca geliştirici ortamı |
+| `RSAT` | AD Users and Computers, AD Sites and Services, DNS, DHCP |
 
-**Kişisel ortam:** PowerShell 7, Windows Terminal, FiraCode Nerd Font, zoxide, starship, fzf, eza, bat, ripgrep, fd, fastfetch, git, gh, neovim + [dotfiles](https://github.com/GokhanTurk/dotfiles)
+**Geliştirici ortamı:** PowerShell 7, Windows Terminal, FiraCode Nerd Font, git, gh, neovim, starship, zoxide, fzf, eza, bat, ripgrep, fd, fastfetch ve [dotfiles](https://github.com/GokhanTurk/dotfiles) yapılandırmaları.
 
 ## Parametreler
 
-| Parametre | |
+| Parametre | Açıklama |
 | --- | --- |
-| `-Profile` | `Gaming`, `Work`, `VM`, `Standard`, `Debloat`, `Neovim`, `Terminal` |
-| `-Level` | `Standard` (varsayılan) veya `Full`; sadece `Debloat` profilinde |
-| `-Yes` | Soru sormaz, geri yükleme noktası oluşturmaz, yeniden başlatmaz |
-| `-DryRun` | Sadece yapılacakları listeler |
-| `-NoLogo` | `-Yes` ile terminal arka planına BJK logosu konmaz (etkileşimli kurulumda sorulur) |
+| `-Profile` | Profil adı |
+| `-Level` | `Standard` veya `Full` (yalnızca `Debloat` profili) |
+| `-Yes` | Onay istemeden çalışır |
+| `-DryRun` | Değişiklik yapmadan planı listeler |
+| `-NoLogo` | Terminal arka plan logosunu eklemez |
 
 ## Debloat seviyeleri
 
-- **Standard:** Sadece çöpler (Bing uygulamaları, Solitaire, Clipchamp, Copilot, LinkedIn...). Hesap makinesi, saat, kamera, fotoğraflar, Xbox, Edge ve Store kalır.
-- **Full:** Microsoft uygulamalarının neredeyse hepsi. Hesap makinesi, Notepad, Terminal, Ekran Alıntısı, Store, Fotoğraflar, Paint ve codec'ler kalır.
+- **Standard:** Bing uygulamaları, Copilot, Clipchamp, LinkedIn, oyunlar gibi gereksiz uygulamalar
+- **Full:** Temel araçlar (Hesap Makinesi, Not Defteri, Terminal, Store, Fotoğraflar, Paint, codec'ler) dışındaki tüm Microsoft uygulamaları
 
-Uygulamalar tüm kullanıcılardan ve yeni açılacak hesaplardan kaldırılır. Log: `%TEMP%\Winsetup.log`
+Değişiklikler mevcut ve yeni kullanıcı hesaplarına uygulanır. Kayıt dosyası: `%TEMP%\Winsetup.log`
 
 ---
 
