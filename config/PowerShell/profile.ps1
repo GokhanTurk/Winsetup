@@ -66,6 +66,7 @@ if (Get-Command fastfetch -ErrorAction SilentlyContinue) {
 }
 
 if (Get-Command eza -ErrorAction SilentlyContinue) {
+    $env:EZA_ICONS_AUTO = 1
     Remove-Item Alias:ls -Force -ErrorAction SilentlyContinue
     function ls { eza @args }
     function ll { eza -l @args }
